@@ -22,6 +22,12 @@ __pycache__/
 *.log
 tmp/
 
+# 🔴 Bí mật — tuyệt đối không đưa vào Docker image
+# (Dockerfile copy cả thư mục python_backend/, nên phải chặn .env ở đây)
+.env
+**/.env
+*.key
+
 # Tài liệu hướng dẫn (không cần cho runtime)
 *.md
 pyrightconfig.json

@@ -1,0 +1,1366 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App Luyện Đọc Tiếng Trung 🇨🇳</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <!-- ================================================================
+         🌐 CẤU HÌNH ĐỊA CHỈ BACKEND — KHI DEPLOY CHỈ CẦN XEM KHU VỰC NÀY
+         Toàn bộ code cũ vẫn gọi "http://127.0.0.1:8000/..." như trước và sẽ
+         được tự động chuyển sang địa chỉ bên dưới — KHÔNG phải sửa chỗ nào khác.
+         ================================================================ -->
+    <script>
+        (function () {
+            var GOC_CU = 'http://127.0.0.1:8000';   // backend khi chạy local (giữ nguyên như cũ)
+
+            // Tự nhận diện môi trường:
+            //   - localhost / 127.0.0.1 / mạng LAN / mở file trực tiếp -> dùng backend local
+            //   - tên miền đã deploy                                    -> gọi CÙNG tên miền (đường dẫn tương đối)
+            var ten = location.hostname;
+            var laMayLocal = (ten === 'localhost' || ten === '127.0.0.1' || ten === '')
+                || /^192\.168\./.test(ten) || /^10\./.test(ten) || /^172\.(1[6-9]|2\d|3[01])\./.test(ten);
+
+            // Nếu muốn tách backend ra tên miền riêng, bỏ comment dòng dưới và dán URL:
+            // window.API_BASE = 'https://ten-backend-cua-ban.onrender.com';
+            if (typeof window.API_BASE === 'undefined') window.API_BASE = laMayLocal ? GOC_CU : '';
+
+            // Tự "đổi địa chỉ" cho MỌI lời gọi fetch cũ (không đụng tới code gốc)
+            var fetchGoc = window.fetch.bind(window);
+            window.fetch = function (dauVao, tuyChon) {
+                if (typeof dauVao === 'string' && dauVao.indexOf(GOC_CU) === 0) {
+                    dauVao = window.API_BASE + dauVao.slice(GOC_CU.length);
+                }
+                return fetchGoc(dauVao, tuyChon);
+            };
+        })();
+    </script>
+
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background-color: #f9fafb; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        input, textarea, select, button { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #d1d5db; border-radius: 5px; box-sizing: border-box; font-family: inherit; }
+        button { background-color: #dc2626; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background-color: #b91c1c; }
+        #app-content { display: none; margin-top: 20px; }
+
+        /* Nút chuyển ngôn ngữ */
+        .lang-switch { display: flex; justify-content: center; gap: 10px; margin-bottom: 10px; }
+        .lang-switch a { text-decoration: none; padding: 8px 22px; border-radius: 20px; font-weight: bold; font-size: 14px; border: 2px solid #e5e7eb; color: #6b7280; }
+        .lang-switch a.active { background: #dc2626; color: white; border-color: #dc2626; }
+
+        /* Từ tiếng Trung có thể trỏ chuột */
+        .word-span { cursor: pointer; border-radius: 3px; transition: background-color 0.2s; padding: 1px 0; user-select: none; -webkit-user-select: none; }
+        .word-span:hover { background-color: #fde68a !important; box-shadow: 0 0 0 2px rgba(220,38,38,0.35); }
+
+        /* Câu có thể bấm để nghe đọc cả câu */
+        .sentence-span { cursor: pointer; border-radius: 3px; }
+        .sentence-span:hover { background-color: rgba(59, 130, 246, 0.10); }
+
+        /* 🗣️ CỤM TỪ / THÀNH NGỮ TRONG BÀI (tiếng Trung) — tính năng mới */
+        #cum-tu-panel-trung { display: none; margin-bottom: 20px; background: #fff1f2; border: 1px solid #fecdd3; border-radius: 6px; padding: 12px 14px; }
+        #cum-tu-title-trung { margin: 0; color: #be123c; font-size: 15px; cursor: pointer; user-select: none; }
+        #cum-tu-count-trung { font-size: 12px; color: #e11d48; font-weight: bold; }
+        #cum-tu-body-trung { display: none; margin-top: 8px; max-height: 240px; overflow-y: auto; padding-right: 6px; line-height: 1.8; }
+        #cum-tu-note-trung { display: none; font-size: 12px; color: #e11d48; margin-top: 6px; }
+        .cumtu-chip { display: inline-flex; align-items: center; gap: 6px; width: auto; background: #fff; color: #be123c; border: 1px solid #fda4af; border-radius: 999px; padding: 5px 12px; margin: 4px 4px 0 0; font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.15s; }
+        .cumtu-chip:hover { background: #ffe4e6; }
+        .cumtu-chip.active { background: #be123c; color: #fff; border-color: #be123c; }
+        mark.cumtu-mark-trung { background: rgba(244, 63, 94, 0.16); border-bottom: 2px solid #e11d48; border-radius: 3px; padding: 0 1px; color: inherit; }
+        mark.cumtu-mark-trung .word-span { border-bottom: none !important; }
+
+        /* 🧩 TỪ GHÉP CỦA 1 CHỮ — khối hiện dưới bảng chi tiết khi bấm chữ Hán */
+        #tu-ghep-block-trung { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #fdba74; }
+        #tu-ghep-title-trung { font-weight: bold; font-size: 14px; color: #b91c1c; margin: 0; }
+        .tughep-chip { display: inline-block; width: auto; background: #fff7ed; color: #9a3412; border: 1px solid #fdba74; border-radius: 999px; padding: 4px 10px; margin: 3px 3px 0 0; font-size: 14px; font-weight: 600; cursor: pointer; }
+        .tughep-chip:hover { background: #ffedd5; }
+        .tughep-chip.active { background: #ea580c; color: #fff; border-color: #ea580c; }
+        .tughep-chip .lvl { font-size: 10px; opacity: .8; margin-left: 3px; font-weight: 400; }
+        #tu-ghep-status-trung { font-size: 12px; color: #b45309; margin: 4px 0; }
+        #tu-ghep-note-trung { font-size: 11px; color: #d97706; margin-top: 4px; }
+
+        /* Tooltip */
+        #custom-tooltip {
+            position: absolute; background-color: #1f2937; color: #f9fafb; padding: 15px 20px;
+            border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); pointer-events: none;
+            z-index: 9999; display: none; max-width: 380px; border: 2px solid #ef4444;
+        }
+        .sample-btn { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; width: auto; padding: 6px 12px; margin-right: 8px; font-size: 13px; }
+        .sample-btn:hover { background: #fde68a; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="lang-switch">
+        <a href="index.html">📖 Tiếng Anh</a>
+        <a href="index_trung.html" class="active">🇨🇳 中文</a>
+    </div>
+
+    <h1 style="text-align: center; color: #1f2937;">Kho Đọc Tiếng Trung 📖</h1>
+
+    <!-- ĐĂNG NHẬP -->
+    <div id="auth-section">
+        <h3>Đăng nhập để vào kho lưu trữ cá nhân</h3>
+        <input type="email" id="email" placeholder="Nhập Email của bạn" required>
+        <input type="password" id="password" placeholder="Nhập Mật khẩu (ít nhất 6 ký tự)" required>
+        <button onclick="signUp()">Đăng ký</button>
+        <button onclick="signIn()" style="background-color: #10b981;">Đăng nhập</button>
+        <p id="auth-message" style="color: red; font-size: 14px;"></p>
+    </div>
+
+    <!-- NỘI DUNG CHÍNH -->
+    <div id="app-content">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3 id="welcome-msg" style="margin: 0;">你好！</h3>
+            <button onclick="signOut()" style="width: auto; background-color: #ef4444; padding: 5px 15px;">Đăng xuất</button>
+        </div>
+        <hr style="margin: 20px 0;">
+
+        <!-- NẠP BÀI MỚI -->
+        <div style="background: #f3f4f6; padding: 20px; border-radius: 8px;">
+            <h3 style="margin-top: 0;">Nạp bài đọc mới 🤖</h3>
+
+            <div style="margin-bottom: 10px;">
+                <span style="font-weight: bold; color: #374151;">📄 Thử nhanh với bài mẫu:</span><br>
+                <button class="sample-btn" onclick="loadSample(0)">🌱 HSK 1-2</button>
+                <button class="sample-btn" onclick="loadSample(1)">🌿 HSK 3-4</button>
+                <button class="sample-btn" onclick="loadSample(2)">🌳 HSK 5-6</button>
+            </div>
+
+            <select id="ocr-lang" style="width: 100%; padding: 8px; margin-bottom: 10px; border-radius: 5px; background-color: #ffffff; cursor: pointer;">
+                <option value="chi_sim">🇨🇳 Giản thể (简体字)</option>
+                <option value="chi_tra">🀄 Phồn thể (繁體字)</option>
+            </select>
+            <input type="file" id="document-file" accept=".pdf,.txt,image/*" multiple onchange="handleFileUp(event)">
+            <input type="text" id="article-title" placeholder="Tiêu đề bài đọc..." required>
+            <textarea id="article-content" rows="8" placeholder="Dán nội dung tiếng Trung vào đây, hoặc chọn file ở trên..." required></textarea>
+            <button onclick="analyzeAndSaveArticle()" style="background-color: #dc2626; font-size: 16px;">🚀 Phân tích từ vựng & Lưu bài</button>
+            <p id="ai-status" style="font-weight: bold; display: none; margin-top: 10px;"></p>
+        </div>
+
+        <!-- KHO TÀI LIỆU -->
+        <div id="reading-section" style="display: block; margin-top: 30px; background: #ffffff; padding: 20px; border-radius: 8px; border: 1px solid #e5e7eb;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="margin: 0; color: #b91c1c;">📚 Kho tài liệu</h3>
+                <button onclick="viewNotebook()" style="background: #dc2626; width: auto; margin: 0; padding: 8px 15px;">📘 Mở Sổ Tay</button>
+            </div>
+
+            <input type="text" id="search-bar" onkeyup="filterArticles()" placeholder="🔍 Tìm kiếm bài đọc..." style="background-color: #f8fafc; margin-top: 0;">
+
+            <ul id="article-list" style="list-style-type: none; padding: 0; margin: 0; max-height: 250px; overflow-y: auto; border: 1px solid #cbd5e1; border-radius: 5px;"></ul>
+
+            <hr style="margin: 20px 0; border-top: 1px dashed #cbd5e1;">
+
+            <!-- SỔ TAY -->
+            <div id="notebook-display" style="display: none; padding-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ddd; padding-bottom: 10px; margin-bottom: 15px;">
+                    <h2 style="color: #b91c1c; margin: 0;">📘 Sổ Tay Từ Vựng</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="startFlashcardsFromNotebook()" style="background: #8b5cf6; width: auto; margin: 0; padding: 5px 15px;">🃏 Flashcards</button>
+                        <button onclick="exportNotebookToCSV()" style="background: #10b981; width: auto; margin: 0; padding: 5px 15px;">📥 Xuất Excel</button>
+                        <button onclick="closeNotebook()" style="background: #ef4444; width: auto; margin: 0; padding: 5px 15px;">❌ Đóng</button>
+                    </div>
+                </div>
+                <div id="notebook-content"></div>
+            </div>
+
+            <!-- GIAO DIỆN ĐỌC BÀI -->
+            <div id="article-display" style="display: none;">
+                <h2 id="display-title" style="color: #111827;"></h2>
+
+                <div style="margin-bottom: 20px; background: #f3f4f6; padding: 12px; border-radius: 6px; display: flex; align-items: center; gap: 10px;">
+                    <label style="font-weight: bold;">🎯 Highlight Từ Vựng:</label>
+                    <select id="level-select" onchange="applyHighlightAndPhraseTrung()" style="width: auto; padding: 8px; cursor: pointer;">
+                        <option value="none">-- Tắt bôi màu --</option>
+                        <option value="ALL">🌟 Tô TẤT CẢ từ vựng HSK</option>
+                        <option value="1">HSK 1 (Xanh lá)</option>
+                        <option value="2">HSK 2 (Xanh ngọc)</option>
+                        <option value="3">HSK 3 (Xanh lơ)</option>
+                        <option value="4">HSK 4 (Xanh dương)</option>
+                        <option value="5">HSK 5 (Tím)</option>
+                        <option value="6">HSK 6 (Hồng)</option>
+                        <option value="7">HSK 7-9 (Đỏ)</option>
+                    </select>
+                    <button id="btn-read-all" onclick="toggleReadAll()" style="background:#3b82f6; width:auto; margin:0; padding:8px 15px;">🔊 Đọc cả bài</button>
+                    <button onclick="showStats()" style="background:#dc2626; width:auto; margin:0; padding:8px 15px;">📊 Thống kê</button>
+                    <button onclick="startFlashcardsFromArticle()" style="background:#eab308; width:auto; margin:0; padding:8px 15px;">🃏 Flashcards</button>
+                </div>
+
+                <!-- 🗣️ CỤM TỪ / THÀNH NGỮ TRONG BÀI (tiếng Trung) — đọc file tĩnh nhanh không cần mạng -->
+                <div id="cum-tu-panel-trung">
+                    <h3 id="cum-tu-title-trung" onclick="toggleCumTuPanelTrung()">🗣️ Cụm từ / Thành ngữ trong bài <span style="font-size:11px; font-weight:normal; color:#be123c;">(bấm để mở)</span></h3>
+                    <span id="cum-tu-count-trung" style="display: block; margin-top: 2px;"></span>
+                    <div id="cum-tu-body-trung"></div>
+                    <div id="cum-tu-note-trung">👉 Bấm 1 cụm để xem nghĩa + tô sáng cụm đó trong bài. 🔊 = nghe phát âm cả cụm.</div>
+                </div>
+
+                <!-- BẢNG CHI TIẾT TỪ ĐANG CHỌN -->
+                <div id="word-info-box" style="display: none; margin-bottom: 20px; background-color: #fff7ed; border: 1px solid #fed7aa; padding: 15px; border-radius: 6px; position: relative;">
+                    <button onclick="speakCurrentWord()" style="position: absolute; top: 15px; right: 15px; background: #3b82f6; width: auto; padding: 6px 12px; margin: 0;">🔊 Đọc từ</button>
+                    <h4 id="info-word" style="margin: 0 0 5px 0; color: #c2410c; font-size: 24px;"></h4>
+                    <p style="margin: 5px 0; font-size: 14px;">
+                        <strong>Pinyin:</strong> <span id="info-pinyin"></span> |
+                        <strong>Âm Hán Việt:</strong> <span id="info-hanviet"></span> |
+                        <strong>Cấp độ:</strong> <span id="info-level" style="font-weight: bold;"></span>
+                    </p>
+                    <p style="margin: 5px 0; font-size: 14px;"><strong>Chữ phồn thể:</strong> <span id="info-trad" style="color: #6b7280;"></span></p>
+                    <p style="margin: 5px 0; font-size: 15px;"><strong>Nghĩa:</strong> <span id="info-meaning"></span></p>
+                    <!-- 🧩 TỪ GHÉP: bấm 1 chữ Hán bất kỳ trong bài → hiện các từ ghép chứa chữ đó (dễ → khó) -->
+                    <div id="tu-ghep-block-trung" style="display: none; margin-top: 12px; padding-top: 10px; border-top: 1px dashed #fdba74;">
+                        <div id="tu-ghep-title-trung">🧩 Từ ghép với chữ <span id="tu-ghep-chu-trung"></span> <span id="tu-ghep-count-trung" style="font-size: 11px; color: #9ca3af; font-weight: normal;"></span></div>
+                        <div id="tu-ghep-status-trung"></div>
+                        <div id="tu-ghep-list-trung" style="display: flex; flex-wrap: wrap; gap: 4px;"></div>
+                        <div id="tu-ghep-note-trung">👉 Bấm 1 từ ghép để nghe + xem nghĩa. Bấm chữ khác trong bài để đổi danh sách.</div>
+                    </div>
+                    <button id="btn-save-current" onclick="saveCurrentWord()" style="background: #eab308; width: auto; padding: 6px 15px; font-size: 14px; margin-top: 10px; margin-bottom: 0;">⭐ Thêm vào Sổ tay</button>
+                </div>
+
+                <!-- VĂN BẢN BÀI ĐỌC -->
+                <div id="display-content" style="white-space: pre-wrap; line-height: 2.0; font-size: 18px; margin-bottom: 30px;"></div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #dc2626; padding-bottom: 10px; margin-bottom: 15px;">
+                    <h3 style="color: #b91c1c; margin: 0; cursor: pointer; user-select: none;" onclick="let v=document.getElementById('display-vocab'); v.style.display = v.style.display==='none' ? 'block':'none'; this.innerText = v.style.display==='none' ? '🧠 Phân tích từ vựng (Nhấp để Mở) 🔽' : '🧠 Phân tích từ vựng (Nhấp để Đóng) 🔼';">🧠 Phân tích từ vựng (Nhấp để Đóng) 🔼</h3>
+                    <button onclick="exportToCSV()" style="background: #10b981; width: auto; padding: 6px 15px; margin: 0;">📥 Xuất Excel (CSV)</button>
+                </div>
+
+                <div id="display-vocab" style="display: block; max-height: 400px; overflow-y: auto; padding-right: 10px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="custom-tooltip"></div>
+
+<!-- Flashcards -->
+<div id="flashcard-modal" style="display:none; position:fixed; inset:0; background:rgba(17,24,39,0.65); z-index:10000; align-items:center; justify-content:center;">
+    <div style="background:#ffffff; border-radius:14px; padding:22px; max-width:480px; width:92%; text-align:center; box-shadow:0 20px 40px rgba(0,0,0,0.3);">
+        <div id="fc-header" style="font-size:14px; color:#6b7280; margin-bottom:8px;"></div>
+        <div id="fc-card" onclick="flipFlashcard()" style="cursor:pointer; border:2px solid #e5e7eb; border-radius:12px; padding:28px 18px; margin:12px 0; min-height:150px; display:flex; flex-direction:column; justify-content:center;"></div>
+        <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+            <button id="fc-know" onclick="flashcardAnswer(true)" style="background:#10b981; width:auto; padding:10px 22px; margin:0;">✓ Đã biết</button>
+            <button id="fc-unknown" onclick="flashcardAnswer(false)" style="background:#ef4444; width:auto; padding:10px 22px; margin:0;">✗ Cần ôn</button>
+            <button onclick="closeFlashcards()" style="background:#6b7280; width:auto; padding:10px 22px; margin:0;">❌ Thoát</button>
+        </div>
+    </div>
+</div>
+
+<!-- Thống kê cấp độ -->
+<div id="stats-modal" style="display:none; position:fixed; inset:0; background:rgba(17,24,39,0.65); z-index:10000; align-items:center; justify-content:center;">
+    <div style="background:#ffffff; border-radius:14px; padding:22px; max-width:460px; width:92%; box-shadow:0 20px 40px rgba(0,0,0,0.3);">
+        <h3 style="margin:0 0 14px 0; color:#111827;">📊 Trình độ từ vựng bài đọc</h3>
+        <div id="stats-body"></div>
+        <button onclick="closeStats()" style="background:#6b7280; width:auto; padding:8px 22px; margin:12px 0 0 0;">❌ Đóng</button>
+    </div>
+</div>
+
+<script>
+    // ============================================================
+    // 1. CẤU HÌNH SUPABASE (dùng chung kho với bản tiếng Anh, bài Trung có tiền tố 🇨🇳)
+    // ============================================================
+    const supabaseUrl = 'https://cidflrjpcwmwdlqidayo.supabase.co';
+    const supabaseKey = 'sb_publishable_HZ396HoOQ5el1jCkWe-5Mg_w5s-vWNk';
+    const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+
+    const CN_PREFIX = '🇨🇳 ';            // đánh dấu bài tiếng Trung trong kho dùng chung
+    let userArticlesData = [];
+    let currentVocabData = [];          // từ vựng bài đang đọc (thứ tự = bảng hiển thị)
+    let currentArticleId = null;
+    let originalContent = "";
+    let currentlySelectedWordIndex = -1;
+    let currentDetailWordTrung = '';   // cụm từ đang hiển thị trong bảng chi tiết (để 🔊 Đọc từ đọc đúng CẢ CỤM)
+    let cumTuTrung = [];               // 🗣️ các cụm từ/thành ngữ trong bài (từ /cn/tim-cum-tu)
+    let cumTuChonTrung = '';           // cụm từ đang được tô sáng trong bài
+    let cumTuFetchSeq = 0;             // số thứ tự lần quét — bỏ kết quả cũ khi chuyển bài nhanh
+    let tuGhepSeq = 0;                // số thứ tự lần tra từ ghép — bỏ kết quả cũ khi bấm nhanh nhiều chữ
+    let tughepList = [];              // kết quả từ ghép đang hiển thị trong bảng chi tiết
+    let liveDict = {};                  // cache /cn/tra-tu
+    let CACHE_NGHIA = {};               // cache /cn/nghia
+    const NET_TIMEOUT = 7000;
+
+    // ============================================================
+    // 2. MÀU HSK + CÁC HÀM TIỆN ÍCH
+    // ============================================================
+    function hskColor(level) {
+        const map = {1:'#86efac',2:'#6ee7b7',3:'#a5f3fc',4:'#93c5fd',5:'#c4b5fd',6:'#f9a8d4',7:'#fca5a5'};
+        return map[level] || '#d1d5db';
+    }
+    function hskLabel(level) {
+        if (!level) return '';
+        return level == '7' ? 'HSK 7-9' : 'HSK ' + level;
+    }
+
+    // ============================================================
+    // 3. TÀI KHOẢN
+    // ============================================================
+    async function signUp() {
+        try {
+            const { error } = await supabaseClient.auth.signUp({ email: document.getElementById('email').value, password: document.getElementById('password').value });
+            document.getElementById('auth-message').innerText = error ? error.message : "Đăng ký thành công!";
+        } catch (e) { document.getElementById('auth-message').innerText = "Lỗi mạng: " + e.message; }
+    }
+    async function signIn() {
+        try {
+            const { error } = await supabaseClient.auth.signInWithPassword({ email: document.getElementById('email').value, password: document.getElementById('password').value });
+            error ? document.getElementById('auth-message').innerText = error.message : checkUser();
+        } catch (e) { document.getElementById('auth-message').innerText = "Lỗi mạng: " + e.message; }
+    }
+    async function signOut() {
+        try { await supabaseClient.auth.signOut(); } catch (e) {}
+        checkUser();
+    }
+    async function checkUser() {
+        try {
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if (user) {
+                document.getElementById('auth-section').style.display = 'none';
+                document.getElementById('app-content').style.display = 'block';
+                document.getElementById('welcome-msg').innerText = "你好！" + (user.email || "");
+                await loadUserArticles();
+            } else {
+                document.getElementById('auth-section').style.display = 'block';
+                document.getElementById('app-content').style.display = 'none';
+            }
+        } catch (e) {
+            console.warn("checkUser lỗi:", e);
+            document.getElementById('auth-section').style.display = 'block';
+            document.getElementById('app-content').style.display = 'none';
+        }
+    }
+
+    // ============================================================
+    // 4. QUẢN LÝ BÀI ĐỌC (chỉ lấy bài tiếng Trung 🇨🇳)
+    // ============================================================
+    async function loadUserArticles() {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) return;
+        let data = null;
+        try {
+            ({ data } = await supabaseClient.from('articles').select('*').eq('user_id', user.id).order('created_at', { ascending: false }));
+        } catch (e) {
+            console.warn("loadUserArticles lỗi:", e);
+            data = null;
+        }
+        userArticlesData = (data || []).filter(a => (a.title || "").startsWith(CN_PREFIX));
+        const list = document.getElementById('article-list'); list.innerHTML = '';
+        if (userArticlesData.length === 0) { list.innerHTML = '<li style="padding:15px;">Kho tiếng Trung trống. Nạp bài mới đi nào!</li>'; return; }
+        userArticlesData.forEach(art => {
+            list.innerHTML += `<li style="display:flex; justify-content:space-between; align-items:center; padding:12px 15px; border-bottom:1px solid #f1f5f9; transition: background 0.2s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                <span style="font-weight:bold; cursor:pointer; flex-grow:1; color:#374151;" onclick="viewArticle('${art.id}')">📖 ${art.title}</span>
+                <div style="display:flex; gap:8px;">
+                    <button onclick="renameArticle('${art.id}')" style="background:#eab308; padding:5px 10px; font-size:13px; margin:0; width:auto;">✏️ Sửa</button>
+                    <button onclick="deleteArticle('${art.id}')" style="background:#ef4444; padding:5px 10px; font-size:13px; margin:0; width:auto;">🗑️ Xóa</button>
+                </div>
+            </li>`;
+        });
+    }
+
+    async function renameArticle(articleId) {
+        const article = userArticlesData.find(a => a.id === articleId);
+        if (!article) return;
+        const newTitle = prompt("Nhập tên mới cho bài đọc:", article.title.replace(CN_PREFIX, ""));
+        if (!newTitle || newTitle === article.title) return;
+        await supabaseClient.from('articles').update({ title: CN_PREFIX + newTitle }).eq('id', articleId);
+        loadUserArticles();
+    }
+    async function deleteArticle(id) {
+        if (confirm("Bạn có chắc chắn muốn xóa bài này?")) {
+            await supabaseClient.from('articles').delete().eq('id', id);
+            document.getElementById('article-display').style.display = 'none';
+            loadUserArticles();
+        }
+    }
+
+    // ============================================================
+    // 5. NẠP FILE / OCR (đọc chữ Trung qua /cn/doc-tai-lieu)
+    // ============================================================
+    async function handleFileUp(e) {
+        let file = e.target.files[0];
+        if (!file) return;
+        const msg = document.getElementById('ai-status');
+        msg.style.display = 'block'; msg.innerText = "⏳ Đang gửi file sang Python để đọc (OCR chữ Trung)..."; msg.style.color = "#d97706";
+        const formData = new FormData();
+        formData.append("file", file);
+        const lang = document.getElementById('ocr-lang').value;
+        try {
+            const response = await fetch(`http://127.0.0.1:8000/cn/doc-tai-lieu?lang=${lang}`, { method: "POST", body: formData });
+            if (!response.ok) throw new Error("Máy chủ Python chưa bật hoặc từ chối nhận file!");
+            const data = await response.json();
+            if (data.error) throw new Error(data.error);
+            const textSach = (data.text_sach || "").trim();
+            if (!textSach) {
+                throw new Error("Không tìm thấy chữ Trung trong file. Thử: ảnh rõ nét hơn, font lớn hơn, hoặc dán văn bản trực tiếp vào ô dưới.");
+            }
+            document.getElementById('article-content').value = textSach;
+            const titleInput = document.getElementById('article-title');
+            if (!titleInput.value) titleInput.value = file.name.replace(/\.[^/.]+$/, "");
+            msg.innerText = "✅ Python đã trích xuất " + textSach.length + " ký tự chữ Trung thành công!"; msg.style.color = "green";
+        } catch (error) {
+            msg.innerText = "❌ Lỗi: " + error.message; msg.style.color = "red";
+        } finally { e.target.value = ""; }
+    }
+
+    // ============================================================
+    // 6. PHÂN TÍCH & LƯU BÀI (jieba cắt từ + pinyin + Hán Việt + HSK + dịch nghĩa)
+    // ============================================================
+    async function analyzeAndSaveArticle() {
+        let title = document.getElementById('article-title').value.trim();
+        const rawContent = document.getElementById('article-content').value.trim();
+        const msg = document.getElementById('ai-status');
+
+        // Kiểm tra đăng nhập TRƯỚC — tránh lỗi user.id null khi phiên hết hạn
+        let user = null;
+        try {
+            const r = await supabaseClient.auth.getUser();
+            user = r.data && r.data.user ? r.data.user : null;
+        } catch (e) { user = null; }
+        if (!user) {
+            msg.style.display = 'block'; msg.style.color = "red";
+            msg.innerText = "🔒 Phiên đăng nhập đã hết hạn. Hãy bấm Đăng xuất rồi đăng nhập lại nhé!";
+            document.getElementById('auth-section').style.display = 'block';
+            document.getElementById('app-content').style.display = 'none';
+            return;
+        }
+
+        // Kiểm tra nội dung — thông báo cụ thể để người dùng biết sửa gì
+        if (!rawContent) {
+            return alert("⚠️ Chưa có NỘI DUNG bài đọc.\n\nHãy dán văn bản tiếng Trung vào ô, hoặc upload file ảnh/PDF ở trên — nhớ chờ thông báo \"✅ trích xuất X ký tự thành công\" rồi mới bấm nút này.");
+        }
+        if (!title) {
+            // Tự sinh tiêu đề từ nội dung thay vì chặn người dùng
+            title = rawContent.slice(0, 18);
+            document.getElementById('article-title').value = title;
+        }
+
+        msg.style.display = 'block'; msg.style.color = "#d97706";
+        msg.innerText = "🚀 Đang gửi văn bản sang Não bộ Python (jieba + pinyin + HSK + dịch tự động)...";
+
+        try {
+            const response = await fetch('http://127.0.0.1:8000/cn/phan-tich-bai-doc', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: rawContent })
+            });
+            if (!response.ok) throw new Error("Máy chủ Python chưa bật hoặc đang bận!");
+            const data = await response.json();
+            const vocab = data.vocab || [];
+            if (vocab.length === 0) { msg.style.color = "red"; msg.innerText = "❌ Không tìm thấy từ vựng nào (văn bản có chữ Hán không?)."; return; }
+
+            const vData = vocab.map(item => ({
+                word: item.word,
+                pinyin: item.pinyin || "",
+                hanviet: item.hanviet || "",
+                level: item.level || "",
+                trad: item.trad || "",
+                mean_en: item.mean_en || "",
+                meaning: item.meaning || "",
+                surfaceForms: [item.word],
+                is_saved: false
+            }));
+
+            msg.innerText = "✅ Python đã xử lý xong! Đang lưu vào cơ sở dữ liệu...";
+            await supabaseClient.from('articles').insert([{ user_id: user.id, title: CN_PREFIX + title, content: rawContent, vocab_data: vData }]);
+            msg.style.color = "green";
+            msg.innerText = "🎉 Hoàn tất! Đã phân tích " + vocab.length + " từ vựng.";
+            document.getElementById('article-title').value = '';
+            document.getElementById('article-content').value = '';
+            loadUserArticles();
+        } catch (error) {
+            msg.style.color = "red"; msg.innerText = "❌ Lỗi: " + error.message;
+        }
+    }
+
+    // ============================================================
+    // 7. BÀI MẪU
+    // ============================================================
+    const SAMPLES = [
+        "你好！我叫小明，我今年二十岁。我是学生，我喜欢学习汉语。我家有三个人：爸爸、妈妈和我。我每天七点起床，八点去学校。我喜欢吃米饭和蔬菜。今天天气很好，我和朋友一起去公园玩。",
+        "昨天是我的生日，朋友们给我买了一个大蛋糕。我们一起唱歌、吃饭，非常开心。在中国，过生日的时候人们常常吃长寿面，表示希望长寿。我的好朋友小李送给我一本书，我很喜欢。我觉得朋友是生活中最重要的人。",
+        "随着科技的发展，人们的生活方式发生了巨大的变化。智能手机已经成为我们日常生活中不可或缺的一部分。虽然科技给我们带来了很多便利，但也引发了一些问题，比如人们沉迷于手机，减少了面对面的交流。我们应该合理地使用科技，让科技真正为人类服务，而不是成为它的奴隶。"
+    ];
+    function loadSample(i) {
+        document.getElementById('article-content').value = SAMPLES[i];
+        document.getElementById('article-title').value = "Bài mẫu HSK " + (i === 0 ? "1-2" : i === 1 ? "3-4" : "5-6");
+    }
+
+    // ============================================================
+    // 8. HIỂN THỊ BÀI ĐỌC — bọc từ bằng <span> theo đúng từ điển jieba (khớp dài nhất)
+    // ============================================================
+    function wrapChinese(text, vocabList) {
+        // Thứ tự khớp: từ DÀI trước (bảo toàn đúng phân đoạn jieba, tránh cắt nhỏ nhầm)
+        const order = vocabList.map((v, idx) => ({ word: v.word, idx }))
+                              .filter(e => e.word && e.word.length > 0)
+                              .sort((a, b) => b.word.length - a.word.length);
+        let out = '';
+        let i = 0;
+        while (i < text.length) {
+            let matched = null;
+            for (const e of order) {
+                if (text.startsWith(e.word, i)) { matched = e; break; }
+            }
+            if (matched) {
+                const cacChu = Array.from(matched.word);
+                if (cacChu.length === 1) {
+                    out += `<span class="word-span" data-index="${matched.idx}" data-char="${matched.word}">${matched.word}</span>`;
+                } else {
+                    // Mỗi CHỮ là 1 span riêng cùng data-index (cùng 1 từ để hover nghĩa CẢ TỪ)
+                    // nhưng có data-char riêng → bấm chữ nào cũng tra được từ ghép của đúng chữ đó
+                    out += cacChu.map(c => `<span class="word-span" data-index="${matched.idx}" data-char="${c}">${c}</span>`).join('');
+                }
+                i += matched.word.length;
+            } else {
+                const ch = text[i];
+                if (/[\u3400-\u4dbf\u4e00-\u9fff]/.test(ch)) {
+                    // Chữ Hán đứng lẻ (chưa thuộc từ vựng bài): vẫn bấm được để tra từ ghép của nó
+                    out += `<span class="word-span" data-index="" data-char="${ch}">${ch}</span>`;
+                } else {
+                    out += ch;
+                }
+                i++;
+            }
+        }
+        // Bọc mỗi câu trong .sentence-span (bấm khoảng trống/dấu câu để nghe cả câu)
+        return wrapChineseSentences(out);
+    }
+
+    // Chia văn bản đã bọc từ thành từng câu (theo 。！？!?) — mỗi câu là một .sentence-span
+    function wrapChineseSentences(html) {
+        const re = /([。！？!?])/g;
+        let out = '', last = 0, m;
+        while ((m = re.exec(html)) !== null) {
+            const sentence = html.slice(last, m.index + 1);
+            if (sentence.trim()) out += `<span class="sentence-span">${sentence}</span>`;
+            last = re.lastIndex;
+        }
+        if (last < html.length) {
+            const sentence = html.slice(last);
+            if (sentence.trim()) out += `<span class="sentence-span">${sentence}</span>`;
+        }
+        return out;
+    }
+
+    function viewArticle(id) {
+        const art = userArticlesData.find(a => a.id === id);
+        if (!art) return;
+        currentArticleId = id;
+        document.getElementById('article-display').style.display = 'block';
+        document.getElementById('display-title').innerText = art.title.replace(CN_PREFIX, "");
+
+        originalContent = (art.content || "").trim();
+        currentVocabData = art.vocab_data && art.vocab_data.length ? [...art.vocab_data] : [];
+        // Bảng hiển thị sắp xếp theo cấp độ HSK
+        currentVocabData.sort((a, b) => (a.level || "9").localeCompare(b.level || "9"));
+
+        // Bọc từ (dùng thứ tự gốc nhưng khớp dài nhất) — dữ liệu-index theo currentVocabData
+        const contentDiv = document.getElementById('display-content');
+        contentDiv.innerHTML = wrapChinese(originalContent, currentVocabData);
+        contentDiv.removeAttribute('data-wrapped');
+
+        document.getElementById('level-select').value = 'none';
+        document.getElementById('word-info-box').style.display = 'none';
+        anTuGhepTrung();
+        renderVocabTable();
+        applyHighlight();
+        timCumTuCuaBaiTrung();   // 🗣️ tìm cụm từ/thành ngữ trong bài rồi hiện chip phía trên
+        // Nạp nghĩa còn thiếu (Google lỗi tạm thời lúc lưu) — chạy nền, không chặn gì
+        currentVocabData.forEach((v, i) => {
+            if (!v.meaning) fillMeaning(v.word);
+        });
+    }
+
+    // ============================================================
+    // 9. BẢNG PHÂN TÍCH TỪ VỰNG
+    // ============================================================
+    function renderVocabTable() {
+        const box = document.getElementById('display-vocab'); box.innerHTML = '';
+        if (currentVocabData.length === 0) { box.innerHTML = '<p>Không có từ vựng.</p>'; return; }
+        currentVocabData.forEach((v, i) => {
+            const lvlBadge = v.level
+                ? `<span style="background:${hskColor(v.level)}; color:#1f2937; padding:2px 8px; border-radius:5px; font-size:12px; font-weight:bold;">${hskLabel(v.level)}</span>`
+                : '';
+            const trad = v.trad && v.trad !== v.word ? `<span style="color:#9ca3af; font-size:14px;">${v.trad}</span>` : '';
+            box.innerHTML += `<div style="margin-bottom:12px; padding:10px; background:#fef2f2; border-left:4px solid #dc2626; position:relative;">
+                <button onclick="speakTTS('${v.word}')" style="position:absolute; top:10px; right:10px; width:auto; margin:0; padding:4px 10px; font-size:13px;">🔊</button>
+                <div style="font-weight:bold; font-size:20px; color:#7f1d1d;">
+                    ${v.word} ${trad}
+                    <span style="font-size:14px; color:#6b7280; font-weight:normal;">${v.pinyin || ""}</span>
+                    <span style="font-size:14px; color:#b45309; font-weight:normal;">${v.hanviet ? "· " + v.hanviet : ""}</span>
+                    ${lvlBadge}
+                </div>
+                <div style="margin-top:5px; color:#374151;">👉 <b>Nghĩa:</b> <span id="mean-display-${i}">${v.meaning || '<span style="color:#ef4444; font-weight:bold;">⏳ Đang tải nghĩa...</span>'}</span></div>
+            </div>`;
+        });
+    }
+
+    // Nạp nghĩa tiếng Việt qua /cn/nghia (chạy nền, cập nhật đúng chỗ khi có kết quả)
+    async function fillMeaning(w) {
+        if (!w || CACHE_NGHIA[w] !== undefined) return;
+        try {
+            const res = await fetchWithTimeout(`http://127.0.0.1:8000/cn/nghia/${encodeURIComponent(w)}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            const meaning = (data.meaning || "").trim();
+            if (!meaning) return;
+            CACHE_NGHIA[w] = meaning;
+
+            // Cập nhật bảng chi tiết nếu đang hiển thị từ này
+            const infoWord = document.getElementById('info-word');
+            if (infoWord && infoWord.innerText.trim() === w) {
+                document.getElementById('info-meaning').innerText = meaning;
+            }
+            // Cập nhật dòng trong bảng từ vựng
+            const idx = currentVocabData.findIndex(v => v.word === w);
+            if (idx !== -1) {
+                currentVocabData[idx].meaning = meaning;
+                const el = document.getElementById(`mean-display-${idx}`);
+                if (el) el.innerHTML = meaning;
+            }
+            // Cập nhật tooltip nếu vẫn đang hiện từ này
+            if (tooltip.style.display === 'block' && tooltipWord === w) {
+                const d = tooltip.dataset;
+                tooltip.innerHTML = tooltipHtml(w, d.pinyin, d.hanviet, d.level, meaning);
+            }
+        } catch (e) {}
+    }
+
+    // ============================================================
+    // 10. TÔ MÀU HSK
+    // ============================================================
+    function applyHighlight() {
+        const lvl = document.getElementById('level-select').value;
+        document.querySelectorAll('#display-content .word-span').forEach(span => {
+            const idx = parseInt(span.getAttribute('data-index'));
+            const v = currentVocabData[idx];
+            if (!v || lvl === 'none' || !v.level) {
+                span.style.background = 'transparent'; span.style.borderBottom = 'none';
+            } else if (lvl === 'ALL' || String(v.level) === lvl) {
+                span.style.background = hskColor(v.level);
+                span.style.borderBottom = '2px dashed #374151';
+            } else {
+                span.style.background = 'transparent'; span.style.borderBottom = 'none';
+            }
+        });
+    }
+
+    // ============================================================
+    // 11. TOOLTIP + CLICK
+    // ============================================================
+    const contentDiv = document.getElementById('display-content');
+    const tooltip = document.getElementById('custom-tooltip');
+    let hoverTimer = null;
+    let tooltipWord = '';
+
+    function fetchWithTimeout(url, options) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), NET_TIMEOUT);
+        return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+    }
+
+    function tooltipHtml(word, pinyin, hanviet, level, meaning) {
+        const py = pinyin ? `<span style="font-size:15px; color:#9ca3af; font-weight:normal;">${pinyin}</span>` : "";
+        const hv = hanviet ? `<span style="font-size:13px; color:#fbbf24; font-weight:normal;">· ${hanviet}</span>` : "";
+        const lvl = level ? `<span style="font-size:12px; background:${hskColor(level)}; color:#1f2937; padding:2px 7px; border-radius:4px; margin-left:6px; font-weight:bold;">${hskLabel(level)}</span>` : "";
+        const meanHtml = meaning ? `👉 <b>Nghĩa:</b> ${meaning}` : "";
+        return `<div style="font-size:26px; font-weight:bold; color:#fde047;">${word} ${py} ${hv} ${lvl}</div>
+                <div style="font-size:15px; margin-top:6px;">${meanHtml}</div>`;
+    }
+
+    async function showTooltipData(idx, x, y) {
+        const v = currentVocabData[idx];
+        if (!v) return;
+        tooltipWord = v.word;
+        tooltip.style.left = x + 'px'; tooltip.style.top = y + 'px';
+        tooltip.style.display = 'block';
+        tooltip.dataset.pinyin = v.pinyin || ""; tooltip.dataset.hanviet = v.hanviet || ""; tooltip.dataset.level = v.level || "";
+        tooltip.innerHTML = tooltipHtml(v.word, v.pinyin, v.hanviet, v.level, v.meaning || "");
+        if (!v.meaning) fillMeaning(v.word);
+    }
+
+    contentDiv.addEventListener('mouseover', function(e) {
+        if (e.target.classList.contains('word-span')) {
+            const idx = parseInt(e.target.getAttribute('data-index'));
+            const x = e.pageX + 15, y = e.pageY + 15;
+            clearTimeout(hoverTimer);
+            hoverTimer = setTimeout(() => showTooltipData(idx, x, y), 300);
+        }
+    });
+    contentDiv.addEventListener('mousemove', function(e) {
+        if (ctrlPressed) {
+            // 🎹 Đang giữ Ctrl: cập nhật tooltip theo từ dưới con trỏ (không đọc to ở đây)
+            const entry = entryUnderPointer(e.clientX, e.clientY);
+            if (entry && entry.v) showTooltipData(currentVocabData.indexOf(entry.v), e.pageX + 15, e.pageY + 15);
+        }
+        if (tooltip.style.display === 'block') {
+            let x = e.pageX + 15, y = e.pageY + 15;
+            if (x + tooltip.offsetWidth > window.innerWidth) x = e.pageX - tooltip.offsetWidth - 10;
+            tooltip.style.left = x + 'px'; tooltip.style.top = y + 'px';
+        }
+    });
+    contentDiv.addEventListener('mouseleave', () => { clearTimeout(hoverTimer); if (!ctrlPressed) tooltip.style.display = 'none'; });
+    contentDiv.addEventListener('mouseout', (e) => {
+        // Chuyển chuột giữa 2 CHỮ của CÙNG 1 từ (chia span theo chữ) → không làm tooltip nháy
+        const nv = e.relatedTarget;
+        const cungTu = nv && nv.closest && e.target.classList.contains('word-span')
+            && nv.closest('.word-span')
+            && nv.closest('.word-span').getAttribute('data-index') === e.target.getAttribute('data-index');
+        if (!cungTu && e.target.classList.contains('word-span')) {
+            clearTimeout(hoverTimer);
+            if (!ctrlPressed) tooltip.style.display = 'none';
+        }
+    });
+
+    contentDiv.addEventListener('click', async function(e) {
+        const spanEl = (e.target && e.target.closest) ? e.target.closest('.word-span') : null;
+        if (!spanEl) {
+            // 🔊 MỚI: bấm vào câu (khoảng trống/dấu câu, ngoài từ) → đọc cả câu
+            const sentenceEl = e.target.closest('.sentence-span');
+            if (sentenceEl) speakSentence(sentenceEl.innerText);
+            return;
+        }
+        const idxRaw = spanEl.getAttribute('data-index') || '';
+        const idx = (idxRaw === '' || idxRaw === '-1') ? -1 : parseInt(idxRaw);
+        const v = (idx >= 0 && currentVocabData[idx]) ? currentVocabData[idx] : null;
+        const ch = (spanEl.getAttribute('data-char') || '').trim();
+        const laHan = !!ch && /[\u3400-\u4dbf\u4e00-\u9fff]/.test(ch);
+        // 🔊 ĐỌC TO NGAY KHI BẤM — giống bản tiếng Anh
+        if (!v) {
+            // Chữ Hán đơn lẻ (chưa nằm trong từ vựng bài): đọc chữ + mở thông tin/từ ghép của chữ đó
+            if (laHan) {
+                speakTTS(ch);
+                hienThiChuDonTrung(ch);
+            }
+            return;
+        }
+        speakTTS(v.word);
+        // 🧩 TỪ GHÉP của đúng chữ vừa bấm (kể cả khi chữ nằm trong 1 từ dài 学生/学习…)
+        if (laHan) hienThiTuGhepTrung(ch);
+
+        const x = e.pageX + 15, y = e.pageY + 15;
+        showTooltipData(idx, x, y);
+
+        document.getElementById('word-info-box').style.display = 'block';
+        document.getElementById('info-word').innerText = v.word;
+        document.getElementById('info-pinyin').innerText = v.pinyin || "";
+        document.getElementById('info-hanviet').innerText = v.hanviet || "";
+        document.getElementById('info-trad').innerText = (v.trad && v.trad !== v.word) ? v.trad : "";
+        const lvlEl = document.getElementById('info-level');
+        lvlEl.innerText = hskLabel(v.level) || "Chưa rõ";
+        lvlEl.style.background = v.level ? hskColor(v.level) : "transparent";
+        lvlEl.style.padding = v.level ? "2px 8px" : "0";
+        lvlEl.style.borderRadius = v.level ? "5px" : "0";
+        document.getElementById('info-meaning').innerText = v.meaning || "⏳ Đang tải nghĩa...";
+        if (!v.meaning) fillMeaning(v.word);
+
+        currentlySelectedWordIndex = idx;
+        const saveBtn = document.getElementById('btn-save-current');
+        saveBtn.innerText = v.is_saved ? "⭐ Đã có trong Sổ tay" : "⭐ Thêm Sổ tay";
+        saveBtn.disabled = !!v.is_saved;
+    });
+
+    // ============================================================
+    // 11.4 🧩 TỪ GHÉP CỦA 1 CHỮ — bấm chữ Hán nào cũng tra được (kho HSK 11.470 từ, sắp dễ → khó)
+    // ============================================================
+    function anTuGhepTrung() {
+        const blk = document.getElementById('tu-ghep-block-trung');
+        if (blk) blk.style.display = 'none';
+    }
+
+    async function hienThiTuGhepTrung(chu) {
+        const blk = document.getElementById('tu-ghep-block-trung');
+        if (!blk || !chu || !/[\u3400-\u4dbf\u4e00-\u9fff]/.test(chu)) return;
+        tuGhepSeq++; const seq = tuGhepSeq;
+        tughepList = [];
+        const chuEl = document.getElementById('tu-ghep-chu-trung'); if (chuEl) chuEl.innerText = chu;
+        const countEl = document.getElementById('tu-ghep-count-trung'); if (countEl) countEl.innerText = '';
+        const listEl = document.getElementById('tu-ghep-list-trung'); if (listEl) listEl.innerHTML = '';
+        const statusEl = document.getElementById('tu-ghep-status-trung');
+        const noteEl = document.getElementById('tu-ghep-note-trung');
+        if (noteEl) noteEl.style.display = 'none';
+        blk.style.display = 'block';
+        if (statusEl) { statusEl.style.display = 'block'; statusEl.innerText = '⏳ Đang tra từ ghép...'; }
+        let data = null;
+        try {
+            const res = await fetchWithTimeout(`http://127.0.0.1:8000/cn/tu-ghep/${encodeURIComponent(chu)}`);
+            if (res.ok) data = await res.json();
+        } catch (e) { data = null; }
+        if (seq !== tuGhepSeq) return;   // đã bấm chữ khác → bỏ kết quả cũ
+        const rs = (data && Array.isArray(data.results)) ? data.results : [];
+        if (!rs.length) {
+            if (statusEl) statusEl.innerText = 'Không tìm thấy từ ghép HSK chứa chữ này.';
+            return;
+        }
+        tughepList = rs;
+        if (statusEl) statusEl.style.display = 'none';
+        if (countEl) countEl.innerText = `· tổng ${data.tong} từ · hiện ${rs.length} từ mức dễ nhất`;
+        if (noteEl) noteEl.style.display = 'block';
+        if (listEl) {
+            listEl.innerHTML = rs.map((t, i) =>
+                `<button type="button" class="tughep-chip" data-i="${i}" title="${escapeHtmlTrung(t.mean_en || '')}">` +
+                `${escapeHtmlTrung(t.word)}<span class="lvl">${hskLabel(String(t.level || ''))}</span></button>`).join('');
+            Array.from(listEl.querySelectorAll('.tughep-chip')).forEach(btn => {
+                btn.onclick = () => bamTuGhepTrung(parseInt(btn.getAttribute('data-i')));
+            });
+        }
+    }
+
+    function bamTuGhepTrung(i) {
+        const t = tughepList[i]; if (!t) return;
+        speakTTS(t.word);
+        const box = document.getElementById('word-info-box'); if (box) box.style.display = 'block';
+        const set = (id, x) => { const el = document.getElementById(id); if (el) el.innerText = x; };
+        set('info-word', t.word);
+        set('info-pinyin', t.pinyin || '');
+        set('info-hanviet', t.hanviet || '');
+        set('info-trad', (t.trad && t.trad !== t.word) ? t.trad : '');
+        const lvlEl = document.getElementById('info-level');
+        const lv = t.level ? String(t.level) : '';
+        if (lvlEl) {
+            lvlEl.innerText = lv ? hskLabel(lv) : '';
+            lvlEl.style.background = lv ? hskColor(lv) : 'transparent';
+            lvlEl.style.padding = lv ? '2px 8px' : '0';
+            lvlEl.style.borderRadius = lv ? '5px' : '0';
+        }
+        set('info-meaning', t.mean_en || '');
+        // Từ ghép không thuộc từ vựng bài → 🔊 Đọc từ đọc đúng từ này, không cho lưu Sổ tay
+        currentlySelectedWordIndex = -1;
+        currentDetailWordTrung = t.word;
+        const saveBtn = document.getElementById('btn-save-current');
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.innerText = '🧩 Từ ghép (không lưu)'; }
+        // Tô chọn chip đang xem
+        document.querySelectorAll('#tu-ghep-list-trung .tughep-chip').forEach((b, j) => b.classList.toggle('active', j === i));
+        // Nạp nghĩa TIẾNG VIỆT nền (mean_en là nghĩa tiếng Anh dự phòng sẵn có)
+        fetchWithTimeout(`http://127.0.0.1:8000/cn/nghia/${encodeURIComponent(t.word)}`)
+            .then(r => r.ok ? r.json() : null).then(d => {
+                const m = (d && d.meaning || '').trim();
+                if (!m) return;
+                CACHE_NGHIA[t.word] = m;
+                if (document.getElementById('info-word') && document.getElementById('info-word').innerText.trim() === t.word) set('info-meaning', m);
+            }).catch(() => {});
+    }
+
+    // Bấm chữ Hán đơn lẻ không thuộc từ vựng bài: hiện pinyin/âm Hán Việt (nếu có) + các từ ghép
+    async function hienThiChuDonTrung(ch) {
+        if (!ch) return;
+        const box = document.getElementById('word-info-box'); if (box) box.style.display = 'block';
+        const set = (id, x) => { const el = document.getElementById(id); if (el) el.innerText = x; };
+        set('info-word', ch);
+        set('info-pinyin', '');
+        set('info-hanviet', '');
+        set('info-trad', '');
+        set('info-meaning', '(chữ Hán đơn lẻ — xem các từ ghép bên dưới để hiểu cách dùng)');
+        const lvlEl = document.getElementById('info-level');
+        if (lvlEl) { lvlEl.innerText = ''; lvlEl.style.background = 'transparent'; lvlEl.style.padding = '0'; }
+        currentlySelectedWordIndex = -1;
+        currentDetailWordTrung = ch;
+        const saveBtn = document.getElementById('btn-save-current');
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.innerText = '🔠 Chữ đơn (không lưu)'; }
+        hienThiTuGhepTrung(ch);
+        try {
+            const res = await fetchWithTimeout(`http://127.0.0.1:8000/cn/tra-tu/${encodeURIComponent(ch)}`);
+            if (!res.ok) return;
+            const d = await res.json();
+            if (!d) return;
+            set('info-pinyin', d.pinyin || '');
+            set('info-hanviet', d.hanviet || '');
+            if (d.level && lvlEl) {
+                const lvs = String(d.level);
+                lvlEl.innerText = hskLabel(lvs);
+                lvlEl.style.background = hskColor(lvs); lvlEl.style.padding = '2px 8px'; lvlEl.style.borderRadius = '5px';
+            }
+        } catch (e) {}
+    }
+
+    // ============================================================
+    // 11.5 🎹 BÀN PHÍM + BẤM GIỮ CHUỘT (ĐỌC LẠI TỪ / CHỈ TAY)
+    // ============================================================
+    let ctrlPressed = false;         // đang giữ Ctrl (chế độ "chỉ tay" đọc lại từ)
+    let ctrlRepeatTimer = null;      // bấm giữ Ctrl -> tự đọc lại liên tục
+    let holdTimer = null;            // đếm ngược để phát hiện bấm GIỮ chuột (600ms)
+    let holdReadTimer = null;        // vòng lặp đọc lại khi đang bấm giữ chuột
+    let isLongPressActive = false;   // đang trong trạng thái long-press
+    let lastMouse = { clientX: 0, clientY: 0, pageX: 0, pageY: 0 };
+
+    // Theo dõi vị trí chuột toàn màn hình (bàn phím không có clientX đáng tin cậy)
+    window.addEventListener('mousemove', function(e) {
+        lastMouse = { clientX: e.clientX, clientY: e.clientY, pageX: e.pageX, pageY: e.pageY };
+    });
+
+    // Tìm từ .word-span nằm dưới con trỏ (theo toạ độ màn hình)
+    function entryUnderPointer(clientX, clientY) {
+        if (clientX == null || clientY == null) return null;
+        try {
+            const el = document.elementFromPoint(clientX, clientY);
+            const span = (el && el.closest) ? el.closest('.word-span') : null;
+            if (!span) return null;
+            const idx = parseInt(span.getAttribute('data-index'));
+            return { idx: idx, v: currentVocabData[idx] || null, char: (span.innerText || '').trim() };
+        } catch (err) { return null; }
+    }
+
+    // Đọc lại 1 từ: hiện tooltip + đọc to (dùng cho Ctrl / long-press)
+    function readWordNow(entry, pos) {
+        if (!entry) return;
+        const x = (pos && pos.pageX != null) ? pos.pageX + 15 : window.innerWidth / 2;
+        const y = (pos && pos.pageY != null) ? pos.pageY + 15 : 90;
+        if (entry.v) {
+            showTooltipData(currentVocabData.indexOf(entry.v), x, y);
+            speakTTS(entry.v.word);
+        } else if (entry.char && /[\u4e00-\u9fff]/.test(entry.char)) {
+            speakTTS(entry.char);  // chữ đơn chưa nằm trong từ điển bài -> đọc chữ đó
+        }
+    }
+
+    // Chế độ bấm GIỮ Ctrl: cứ 1 giây đọc lại từ đang trỏ (kể cả khi rê chuột)
+    function startCtrlRepeat() {
+        stopCtrlRepeat();
+        const doRead = () => {
+            const entry = entryUnderPointer(lastMouse.clientX, lastMouse.clientY);
+            if (entry) readWordNow(entry, lastMouse);
+        };
+        doRead();
+        ctrlRepeatTimer = setInterval(doRead, 1000);
+    }
+    function stopCtrlRepeat() {
+        if (ctrlRepeatTimer) { clearInterval(ctrlRepeatTimer); ctrlRepeatTimer = null; }
+    }
+
+    document.addEventListener('keydown', function(e) {
+        const tag = (e.target && e.target.tagName) || '';
+        const dangGoChu = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable));
+
+        // Ctrl + Shift + B: đọc lại từ đang trỏ (bỏ qua nếu đang gõ trong ô nhập)
+        if (e.ctrlKey && e.shiftKey && (e.key === 'B' || e.key === 'b')) {
+            e.preventDefault();
+            if (e.repeat || dangGoChu) return;
+            ctrlPressed = true;
+            const entry = entryUnderPointer(lastMouse.clientX, lastMouse.clientY)
+                || (currentlySelectedWordIndex !== -1 ? { idx: currentlySelectedWordIndex, v: currentVocabData[currentlySelectedWordIndex] } : null);
+            if (entry) readWordNow(entry, lastMouse);
+            return;
+        }
+        // Bấm GIỮ Ctrl: vào chế độ "chỉ tay" — đọc lại từ đang trỏ liên tục
+        if (e.key === 'Control' && !ctrlPressed && !dangGoChu && !e.shiftKey) {
+            ctrlPressed = true;
+            startCtrlRepeat();
+        }
+    });
+    document.addEventListener('keyup', function(e) {
+        if (e.key === 'Control') { ctrlPressed = false; stopCtrlRepeat(); }
+    });
+
+    // Bấm GIỮ chuột 1 từ (0.6s) -> tự đọc lại từ đó liên tục
+    contentDiv.addEventListener('mousedown', function(e) {
+        if (e.button !== 0) return;
+        const span = e.target.closest('.word-span');
+        if (!span) return;
+        e.preventDefault();  // 🛡️ chặn tiện ích chọn text / long-press của trình duyệt
+        const idx = parseInt(span.getAttribute('data-index'));
+        const v = currentVocabData[idx];
+        clearTimeout(holdTimer); clearInterval(holdReadTimer); holdReadTimer = null;
+        isLongPressActive = false;
+        holdTimer = setTimeout(() => {
+            isLongPressActive = true;
+            const entry = { idx: idx, v: v, char: (span.innerText || '').trim() };
+            readWordNow(entry, { pageX: e.pageX, pageY: e.pageY });
+            holdReadTimer = setInterval(() => {
+                if (v) speakTTS(v.word);
+                else if (entry.char && /[\u4e00-\u9fff]/.test(entry.char)) speakTTS(entry.char);
+            }, 1200);
+        }, 600);
+    });
+    // Nhả chuột (ở bất kỳ đâu) -> dừng vòng đọc + chặn click thường 1 lần nếu vừa long-press
+    window.addEventListener('mouseup', function() {
+        clearTimeout(holdTimer); clearInterval(holdReadTimer); holdReadTimer = null;
+        if (isLongPressActive) {
+            const stopClick = (ev) => { ev.preventDefault(); ev.stopPropagation(); contentDiv.removeEventListener('click', stopClick, true); };
+            contentDiv.addEventListener('click', stopClick, true);
+            setTimeout(() => contentDiv.removeEventListener('click', stopClick, true), 300);
+            isLongPressActive = false;
+        }
+    });
+    contentDiv.addEventListener('mouseleave', function() {
+        clearTimeout(holdTimer); clearInterval(holdReadTimer); holdReadTimer = null;
+        isLongPressActive = false;
+    });
+
+    // ============================================================
+    // 12. TIỆN ÍCH: ĐỌC, LƯU, XUẤT CSV, SỔ TAY
+    // ============================================================
+    function speakTTS(t) { speakGoogleTTS(t, 'zh-CN', 0.9); }
+    function speakCurrentWord() {
+        if (currentlySelectedWordIndex !== -1 && currentVocabData[currentlySelectedWordIndex]) {
+            speakTTS(currentVocabData[currentlySelectedWordIndex].word);
+        } else if (currentDetailWordTrung) {
+            speakTTS(currentDetailWordTrung);   // đang xem chi tiết 1 CỤM TỪ → đọc cả cụm
+        }
+    }
+
+    async function saveCurrentWord() {
+        if (currentlySelectedWordIndex === -1) return;
+        const v = currentVocabData[currentlySelectedWordIndex];
+        if (v.is_saved) return;
+        v.is_saved = true;
+        const btn = document.getElementById('btn-save-current');
+        btn.innerText = "⏳ Đang lưu...";
+        try {
+            await supabaseClient.from('articles').update({ vocab_data: currentVocabData }).eq('id', currentArticleId);
+            // Cập nhật ngay bản ghi trong bộ nhớ — bấm "Mở Sổ Tay" thấy từ mới lưu NGAY, không cần F5
+            const art = userArticlesData.find(a => a.id === currentArticleId);
+            if (art) art.vocab_data = currentVocabData;
+            btn.innerText = "⭐ Đã có"; btn.disabled = true;
+        } catch (e) {
+            v.is_saved = false;
+            btn.innerText = "❌ Lưu thất bại — thử lại";
+            btn.disabled = false;
+        }
+    }
+
+    function exportToCSV() {
+        if (!currentVocabData || currentVocabData.length === 0) return alert("Không có từ vựng để xuất!");
+        let csvContent = "\uFEFFTừ vựng,Pinyin,Âm Hán Việt,Cấp độ HSK,Nghĩa,Chữ phồn thể\n";
+        currentVocabData.forEach(row => {
+            csvContent += `"${row.word||''}","${row.pinyin||''}","${row.hanviet||''}","${row.level||''}","${(row.meaning||'').replace(/"/g, '""')}","${(row.trad||'').replace(/"/g, '""')}"\n`;
+        });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }));
+        link.download = `TuVung_${document.getElementById('display-title').innerText}.csv`;
+        link.click();
+    }
+
+    function viewNotebook() {
+        document.getElementById('reading-section').children[1].style.display = 'none';
+        document.getElementById('article-list').style.display = 'none';
+        document.getElementById('article-display').style.display = 'none';
+        document.getElementById('notebook-display').style.display = 'block';
+        let nb = document.getElementById('notebook-content'); nb.innerHTML = '';
+        let hasWords = false;
+        userArticlesData.forEach(a => {
+            if (!a.vocab_data) return;
+            const saved = a.vocab_data.filter(v => v.is_saved);
+            if (saved.length > 0) {
+                hasWords = true;
+                nb.innerHTML += `<h3 style="background:#fee2e2; padding:10px; margin-top:15px;">${a.title.replace(CN_PREFIX, "")}</h3>`;
+                saved.forEach(v => {
+                    nb.innerHTML += `<div style="margin-bottom:10px; padding:10px; background:#fffbeb; border-left:4px solid #f59e0b;">
+                        <b style="font-size:18px;">${v.word}</b>
+                        <span style="color:#6b7280; font-size:13px;"> ${v.pinyin || ""} · ${v.hanviet || ""}</span>
+                        ${v.level ? `<span style="background:${hskColor(v.level)}; padding:1px 6px; border-radius:4px; font-size:11px; font-weight:bold;">${hskLabel(v.level)}</span>` : ""}<br>
+                        👉 ${v.meaning || ""}
+                    </div>`;
+                });
+            }
+        });
+        if (!hasWords) nb.innerHTML = "<p>Sổ tay trống! Bấm ⭐ vào từ trong bài để lưu.</p>";
+    }
+    function closeNotebook() {
+        document.getElementById('notebook-display').style.display = 'none';
+        document.getElementById('reading-section').children[1].style.display = 'block';
+        document.getElementById('article-list').style.display = 'block';
+    }
+    function exportNotebookToCSV() {
+        let csvContent = "\uFEFFBài học,Từ vựng,Pinyin,Âm Hán Việt,Cấp độ HSK,Nghĩa\n";
+        let hasWords = false;
+        userArticlesData.forEach(article => {
+            if (!article.vocab_data) return;
+            article.vocab_data.filter(v => v.is_saved).forEach(row => {
+                hasWords = true;
+                csvContent += `"${article.title.replace(CN_PREFIX, "")}","${row.word||''}","${row.pinyin||''}","${row.hanviet||''}","${row.level||''}","${(row.meaning||'').replace(/"/g, '""')}"\n`;
+            });
+        });
+        if (!hasWords) return alert("Sổ tay trống!");
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }));
+        link.download = `SoTayTuVung_Trung.csv`;
+        link.click();
+    }
+    function filterArticles() {
+        const q = document.getElementById('search-bar').value.toLowerCase();
+        Array.from(document.getElementById('article-list').children).forEach(li => li.style.display = li.innerText.toLowerCase().includes(q) ? "flex" : "none");
+    }
+
+    // ============================================================
+    // 11. 🔊 ĐỌC CÂU / ĐOẠN + GIỌNG GOOGLE TTS
+    // ============================================================
+    const READ_LANG = 'zh-CN';
+    const READ_RATE = 0.9;
+    let currentAudio = null;
+    let isReadingAll = false;
+
+    function resetReadAllButton() {
+        isReadingAll = false;
+        const b = document.getElementById('btn-read-all');
+        if (b) b.innerText = '🔊 Đọc cả bài';
+    }
+    function stopSpeech() {
+        window.speechSynthesis.cancel();
+        if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+        resetReadAllButton();
+    }
+    function speakSynthesis(t, lang, rate) {
+        const u = new SpeechSynthesisUtterance(t);
+        u.lang = lang; u.rate = rate;
+        window.speechSynthesis.speak(u);
+    }
+    // Giọng "thật" Google TTS cho văn bản ngắn (từ/câu ≤ 180 ký tự); dài hơn dùng giọng máy
+    function speakGoogleTTS(t, lang, rate) {
+        const clean = (t || '').trim();
+        if (!clean) return;
+        stopSpeech();
+        if (clean.length <= 180) {
+            const audio = new Audio(`https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(clean)}&tl=${lang}&client=tw-ob`);
+            currentAudio = audio;
+            audio.onended = () => { if (currentAudio === audio) currentAudio = null; };
+            audio.play().catch(() => { if (currentAudio === audio) currentAudio = null; speakSynthesis(clean, lang, rate); });
+        } else speakSynthesis(clean, lang, rate);
+    }
+    function speakSentence(t) { speakGoogleTTS(t, READ_LANG, READ_RATE); }
+    function toggleReadAll() {
+        const b = document.getElementById('btn-read-all');
+        if (!b) return;
+        if (isReadingAll) { stopSpeech(); return; }
+        const text = (originalContent || '').trim();
+        if (!text) return;
+        stopSpeech();
+        isReadingAll = true;
+        b.innerText = '⏹ Dừng đọc';
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = READ_LANG; u.rate = READ_RATE;
+        u.onend = u.onerror = resetReadAllButton;
+        window.speechSynthesis.speak(u);
+    }
+
+    // ============================================================
+    // 12. 🃏 FLASHCARDS
+    // ============================================================
+    let fcDeck = [], fcPos = 0, fcKnown = 0, fcTotal = 0, fcFlipped = false;
+    function startFlashcardsFromArticle() { startFlashcards(currentVocabData.filter(v => v && v.word)); }
+    function startFlashcardsFromNotebook() {
+        const words = [];
+        userArticlesData.forEach(a => (a.vocab_data || []).forEach(v => { if (v.is_saved && v.word) words.push(v); }));
+        startFlashcards(words);
+    }
+    function startFlashcards(words) {
+        words = (words || []).filter(v => v && v.word);
+        if (words.length === 0) { alert("Chưa có từ nào để ôn! Hãy bấm ⭐ để lưu từ vào Sổ tay trước."); return; }
+        fcDeck = words.map(v => ({ word: v.word, pinyin: v.pinyin || '', hanviet: v.hanviet || '', meaning: v.meaning || '', level: v.level || '', trad: v.trad || '' }));
+        for (let i = fcDeck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [fcDeck[i], fcDeck[j]] = [fcDeck[j], fcDeck[i]]; }
+        fcPos = 0; fcKnown = 0; fcTotal = fcDeck.length; fcFlipped = false;
+        document.getElementById('flashcard-modal').style.display = 'flex';
+        renderFlashcard();
+    }
+    function renderFlashcard() {
+        const card = fcDeck[fcPos];
+        document.getElementById('fc-header').innerText = `Thẻ ${fcPos + 1}/${fcDeck.length} · Đã biết ${fcKnown}/${fcTotal}`;
+        document.getElementById('fc-card').innerHTML = fcFlipped
+            ? `<div style="font-size:24px; font-weight:bold; color:#1f2937;">${card.word} ${card.trad && card.trad !== card.word ? `<span style="color:#9ca3af; font-size:16px; font-weight:normal;">${card.trad}</span>` : ''}</div>
+               <div style="font-size:16px; color:#6b7280; margin-top:6px;">${card.pinyin} ${card.hanviet ? '· ' + card.hanviet : ''}</div>
+               <div style="margin-top:6px;">${card.level ? `<span style="background:${hskColor(card.level)}; padding:2px 8px; border-radius:4px; font-size:13px; font-weight:bold;">${hskLabel(card.level)}</span>` : ''}</div>
+               <div style="font-size:16px; color:#374151; margin-top:12px;">👉 ${card.meaning || '—'}</div>`
+            : `<div style="font-size:34px; font-weight:bold; color:#1f2937;">${card.word}</div>
+               <div style="font-size:13px; color:#9ca3af; margin-top:8px;">👆 Bấm vào thẻ để xem nghĩa</div>`;
+    }
+    function flipFlashcard() { fcFlipped = !fcFlipped; renderFlashcard(); }
+    function flashcardAnswer(know) {
+        if (know) {
+            fcKnown++;
+            fcDeck.splice(fcPos, 1);
+        } else {
+            fcDeck.push(fcDeck[fcPos]);
+            fcDeck.splice(fcPos, 1);
+        }
+        if (fcPos >= fcDeck.length) fcPos = 0;
+        if (fcDeck.length === 0) {
+            document.getElementById('fc-header').innerText = '';
+            document.getElementById('fc-card').innerHTML = `<div style="font-size:22px; font-weight:bold; color:#10b981;">🎉 Hoàn thành!</div>
+                <div style="font-size:15px; color:#374151; margin-top:8px;">Đã ôn ${fcTotal} từ, nhớ ${fcKnown}, cần ôn lại ${fcTotal - fcKnown}.</div>`;
+            document.getElementById('fc-know').style.display = 'none';
+            document.getElementById('fc-unknown').style.display = 'none';
+            return;
+        }
+        fcFlipped = false;
+        renderFlashcard();
+    }
+    function closeFlashcards() {
+        document.getElementById('flashcard-modal').style.display = 'none';
+        document.getElementById('fc-know').style.display = 'inline-block';
+        document.getElementById('fc-unknown').style.display = 'inline-block';
+    }
+
+    // ============================================================
+    // 13. 📊 THỐNG KÊ CẤP ĐỘ (HSK)
+    // ============================================================
+    function showStats() {
+        const total = currentVocabData.length;
+        const counts = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0, '6': 0, '7': 0, 'Chưa rõ': 0 };
+        currentVocabData.forEach(v => { const k = v.level ? String(v.level) : ''; if (counts[k] !== undefined) counts[k]++; else counts['Chưa rõ']++; });
+        let html = `<p style="margin:0 0 12px 0; color:#374151;">Tổng từ vựng được phân tích: <b>${total}</b></p>`;
+        [['1', 'HSK 1'], ['2', 'HSK 2'], ['3', 'HSK 3'], ['4', 'HSK 4'], ['5', 'HSK 5'], ['6', 'HSK 6'], ['7', 'HSK 7-9'], ['Chưa rõ', 'Chưa rõ']].forEach(cfg => {
+            const n = counts[cfg[0]] || 0;
+            const pct = total ? Math.round(n / total * 100) : 0;
+            const color = cfg[0] === 'Chưa rõ' ? '#e5e7eb' : hskColor(cfg[0]);
+            html += `<div style="display:flex; align-items:center; gap:10px; margin:5px 0;">
+                <span style="width:70px; font-weight:bold; color:#1f2937;">${cfg[1]}</span>
+                <div style="flex:1; background:#f3f4f6; border-radius:6px; overflow:hidden;">
+                    <div style="width:${pct}%; background:${color}; height:20px; border-radius:6px; display:flex; align-items:center; justify-content:center; min-width:${pct ? '26px' : '0'};">
+                        ${pct ? `<span style="font-size:12px; font-weight:bold; color:#1f2937;">${pct}%</span>` : ''}
+                    </div>
+                </div>
+                <span style="width:55px; text-align:right; color:#6b7280; font-size:13px;">${n} từ</span>
+            </div>`;
+        });
+        document.getElementById('stats-body').innerHTML = html;
+        document.getElementById('stats-modal').style.display = 'flex';
+    }
+    function closeStats() { document.getElementById('stats-modal').style.display = 'none'; }
+
+    // Chặn tiếng ồn "Uncaught (in promise)" do mạng/phiên — đã xử lý trong từng hàm
+    window.addEventListener('unhandledrejection', function (event) {
+        event.preventDefault();
+        console.warn("Đã chặn promise lỗi:", event.reason);
+    });
+
+    // ============================================================
+    // 14. 🗣️ CỤM TỪ / THÀNH NGỮ TRONG BÀI (TIẾNG TRUNG)
+    // ============================================================
+    function escapeHtmlTrung(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    // Quét bài hiện tại qua /cn/tim-cum-tu (đọc file tĩnh cum_tu_tieng_trung.json — không gọi mạng ngoài)
+    function timCumTuCuaBaiTrung() {
+        // 👉 Đánh số từng lần quét: nếu chuyển bài nhanh trước khi server trả về thì BỎ kết quả cũ
+        cumTuFetchSeq += 1;
+        const seq = cumTuFetchSeq;
+        const panel = document.getElementById('cum-tu-panel-trung'); if (!panel) return;
+        cumTuTrung = []; cumTuChonTrung = '';
+        panel.style.display = 'none';   // ẩn ngay, tránh kẹt chip của bài cũ trong lúc chờ
+        const body = document.getElementById('cum-tu-body-trung'); if (body) body.innerHTML = '';
+        const count = document.getElementById('cum-tu-count-trung');
+        const ad = document.getElementById('article-display');
+        if (!originalContent || !ad || ad.style.display !== 'block') return;
+        fetchWithTimeout('http://127.0.0.1:8000/cn/tim-cum-tu', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: originalContent.slice(0, 8000) })   // chỉ quét đầu bài cho nhanh
+        }, 8000).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).then(d => {
+            if (seq !== cumTuFetchSeq) return;   // đã chuyển bài khác → bỏ kết quả cũ
+            cumTuTrung = (d && d.cum_tu) || [];
+            if (cumTuTrung.length === 0) { return; }   // panel đã được ẩn sẵn từ đầu
+            const tong = cumTuTrung.reduce((s, c) => s + (c.so_lan || 1), 0);
+            if (count) count.textContent = `(Tìm thấy ${cumTuTrung.length} cụm · ${tong} lần xuất hiện)`;
+            if (body) {
+                body.innerHTML = cumTuTrung.map((c, i) =>
+                    `<button type="button" class="cumtu-chip${cumTuChonTrung === c.cum_tu ? ' active' : ''}" onclick="hienThiCumTuTrung(${i})" title="Nghĩa: ${escapeHtmlTrung(c.nghia)} · ${c.so_lan} lần">` +
+                    `${escapeHtmlTrung(c.cum_tu)} <span style="opacity:.75; font-size:11px;">${escapeHtmlTrung(c.loai)} · ×${c.so_lan}</span>` +
+                    ` <span onclick="event.stopPropagation(); ngheCumTuTrung(${i})">🔊</span></button>`).join('');
+            }
+            panel.style.display = 'block';
+            toggleCumTuPanelTrung(true);
+        }).catch(e => { console.log('Lỗi tìm cụm từ trong bài:', e); panel.style.display = 'none'; });
+    }
+
+    function toggleCumTuPanelTrung(mo) {
+        const body = document.getElementById('cum-tu-body-trung'); if (!body) return;
+        const note = document.getElementById('cum-tu-note-trung');
+        const title = document.getElementById('cum-tu-title-trung');
+        const hien = mo !== undefined ? !!mo : (body.style.display !== 'block');
+        body.style.display = hien ? 'block' : 'none';
+        if (note) note.style.display = hien && cumTuTrung.length ? 'block' : 'none';
+        if (title) title.innerHTML = hien
+            ? '🗣️ Cụm từ / Thành ngữ trong bài <span style="font-size:11px; font-weight:normal; color:#be123c;">(bấm tiêu đề để gọn lại)</span>'
+            : '🗣️ Cụm từ / Thành ngữ trong bài <span style="font-size:11px; font-weight:normal; color:#be123c;">(bấm để mở)</span>';
+    }
+
+    // Bấm 1 chip cụm từ: tô sáng cụm trong bài + đưa nghĩa/pinyin/âm Hán Việt lên bảng chi tiết
+    function hienThiCumTuTrung(i) {
+        const c = cumTuTrung[i]; if (!c) return;
+        anTuGhepTrung();      // xem cụm từ → ẩn khối từ ghép của chữ cũ đi
+        cumTuChonTrung = c.cum_tu;
+        document.querySelectorAll('#cum-tu-body-trung .cumtu-chip').forEach((b, j) => b.classList.toggle('active', j === i));
+        bamCumTuTrung(c.cum_tu);
+        document.getElementById('word-info-box').style.display = 'block';
+        const set = (id, v) => { const el = document.getElementById(id); if (el) el.innerText = v; };
+        set('info-word', c.cum_tu);
+        set('info-pinyin', c.pinyin || '');
+        set('info-hanviet', c.hanviet || '');
+        set('info-trad', '');
+        const lvlEl = document.getElementById('info-level');
+        if (lvlEl) { lvlEl.innerText = '🗣️ ' + (c.loai || 'cụm từ'); lvlEl.style.background = 'transparent'; lvlEl.style.padding = '0'; lvlEl.style.borderRadius = '0'; }
+        set('info-meaning', `${c.nghia || ''} (🔁 xuất hiện ${c.so_lan} lần trong bài — bấm 🔊 phía trên để nghe)`);
+        currentlySelectedWordIndex = -1;      // cụm không phải từ vựng đơn lẻ trong bài
+        currentDetailWordTrung = c.cum_tu;    // để nút 🔊 Đọc từ đọc đúng CẢ CỤM
+        const saveBtn = document.getElementById('btn-save-current');
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.innerText = '🗣️ Cụm từ (không lưu)'; }
+    }
+
+    function ngheCumTuTrung(i) {
+        const c = cumTuTrung[i]; if (!c) return;
+        speakTTS(c.cum_tu);
+    }
+
+    // Tìm node text (sâu nhất) chứa vị trí ký tự `offset` tính từ đầu văn bản của `.sentence-span`
+    // (hỗ trợ chữ Trung nằm trong text thường lẫn trong các span từ vựng đã bọc).
+    function tinhViTriCn(children, offset) {
+        const list = children && children.length ? Array.from(children) : [];
+        let acc = 0;
+        for (let i = 0; i < list.length; i++) {
+            const nd = list[i];
+            const len = (nd.textContent || '').length;
+            if (offset <= acc + len) {
+                if (nd.nodeType === Node.TEXT_NODE) return [nd, Math.max(0, offset - acc)];
+                if (nd.firstChild) return tinhViTriCn(nd.childNodes, offset - acc);   // span từ vựng / mark
+                return [nd, 0];
+            }
+            acc += len;
+        }
+        const cuoi = list.length ? list[list.length - 1] : null;
+        if (!cuoi) return null;
+        if (cuoi.nodeType === Node.TEXT_NODE) return [cuoi, cuoi.textContent.length];
+        if (cuoi.firstChild) return tinhViTriCn(cuoi.childNodes, (cuoi.textContent || '').length);
+        return [cuoi, (cuoi.textContent || '').length];
+    }
+
+    // 🔎 Tô sáng MỌI lần xuất hiện của cụm từ trong bài (nền hồng + gạch chân đỏ).
+    // Xử lý ở cấp TỪNG CÂU (.sentence-span), dùng Range để bọc đúng đoạn ký tự — các span
+    // từ vựng bên trong vẫn được giữ nguyên nên hover/bấm từ (tooltip + đọc) vẫn hoạt động.
+    function bamCumTuTrung(cumTu) {
+        const div = document.getElementById('display-content');
+        if (!div || !cumTu) return;
+        // 1) Gỡ dấu cụm cũ (trả lại đúng vị trí các span từ vựng)
+        Array.from(div.querySelectorAll('mark.cumtu-mark-trung')).forEach(mk => {   // mảng tĩnh: gỡ nhiều mark không bị bỏ sót
+            const p = mk.parentNode;
+            while (mk.firstChild) p.insertBefore(mk.firstChild, mk);
+            p.removeChild(mk);
+        });
+        div.querySelectorAll('.sentence-span').forEach(cau => {
+            const vb = cau.textContent;
+            const kq = [];
+            let tim = 0;
+            while ((tim = vb.indexOf(cumTu, tim)) !== -1) { kq.push([tim, tim + cumTu.length]); tim += cumTu.length; }
+            // duyệt NGƯỢC để vị trí trong câu không bị xê dịch khi đã bọc vài chỗ
+            for (let k = kq.length - 1; k >= 0; k--) {
+                const b = kq[k][0], e = kq[k][1];
+                const dDau = tinhViTriCn(cau.childNodes, b);
+                const dCuoi = tinhViTriCn(cau.childNodes, e);
+                if (!dDau || !dCuoi) continue;
+                const range = document.createRange();
+                range.setStart(dDau[0], dDau[1]);
+                range.setEnd(dCuoi[0], dCuoi[1]);
+                if (range.collapsed) continue;
+                const mk = document.createElement('mark');
+                mk.className = 'cumtu-mark-trung';
+                mk.setAttribute('data-cumtu', '1');
+                mk.appendChild(range.extractContents());
+                range.insertNode(mk);
+            }
+        });
+    }
+
+    // Đổi mức tô màu HSK → vẫn giữ nguyên cụm từ đang tô sáng
+    function applyHighlightAndPhraseTrung() {
+        applyHighlight();
+        if (cumTuChonTrung) bamCumTuTrung(cumTuChonTrung);
+    }
+
+    checkUser();
+</script>
+</body>
+</html>

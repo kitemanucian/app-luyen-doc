@@ -1,0 +1,30 @@
+# ============================================================
+# 🚫 Những file KHÔNG đẩy lên GitHub
+# ============================================================
+
+# 🔴 BÍ MẬT — tuyệt đối không commit
+.env
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Rác macOS (ổ đĩa này sinh rất nhiều file ._*)
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# File sao lưu & log
+*.bak*
+*.log
+tmp/
+
+# IDE
+.vscode/
+.idea/

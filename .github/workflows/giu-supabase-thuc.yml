@@ -1,0 +1,78 @@
+# ============================================================
+# 🤖 GIỮ SUPABASE KHÔNG BỊ TẠM DỪNG (PAUSE)
+#
+# Supabase gói miễn phí sẽ TẠM DỪNG project nếu 7 ngày liên tục
+# không có hoạt động API nào. Workflow này tự động "điểm danh"
+# bằng 1 câu truy vấn rất nhẹ, mỗi 2 ngày một lần.
+#
+# GitHub chạy miễn phí, bạn KHÔNG cần cài gì, KHÔNG cần thẻ.
+# ============================================================
+name: Giu Supabase hoat dong
+
+on:
+  schedule:
+    # 03:00 UTC, mỗi 2 ngày  (≈ 10:00 sáng giờ Việt Nam)
+    - cron: "0 3 */2 * *"
+  workflow_dispatch: # cho phép bạn bấm chạy thử bằng tay trên GitHub
+
+permissions:
+  contents: write # cần để tự tạo commit "gia hạn" (xem bước 3)
+
+jobs:
+  diem-danh:
+    runs-on: ubuntu-latest
+    steps:
+      # Bắt buộc phải có, để bước 3 commit được
+      - uses: actions/checkout@v4
+
+      - name: 1) Goi 1 API nhe cua Supabase
+        run: |
+          URL="https://cidflrjpcwmwdlqidayo.supabase.co/rest/v1/articles?select=id&limit=1"
+          # Khóa này là khóa CÔNG KHAI (đã nằm sẵn trong index.html, ai cũng thấy).
+          # Nó chỉ đọc được dữ liệu mà RLS cho phép, nên để lộ là bình thường.
+          KEY="sb_publishable_HZ396HoOQ5el1jCkWe-5Mg_w5s-vWNk"
+
+          CODE=$(curl -s -o /tmp/kq.json -w "%{http_code}" "$URL" \
+                 -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
+
+          echo "Ma phan hoi : HTTP $CODE"
+          echo "Noi dung    : $(head -c 200 /tmp/kq.json)"
+
+          if [ "$CODE" != "200" ] && [ "$CODE" != "206" ]; then
+            echo "❌ Khong goi duoc Supabase (co the project da bi pause)."
+            echo "   Vao https://supabase.com/dashboard -> chon project -> bam Restore."
+            exit 1
+          fi
+          echo "✅ Supabase da co hoat dong -> khong bi pause."
+
+      - name: 2) Kiem tra app tren VPS con song khong (tuy chon)
+        continue-on-error: true
+        run: |
+          # Ô này chỉ báo cho bạn biết, không làm hỏng workflow.
+          # Nếu bạn đã gắn tên miền, thay TEN-MIEN bên dưới rồi bỏ dấu # ở 2 dòng dưới.
+          # URL="https://TEN-MIEN-CUA-BAN/tra-tu/hello"
+          # curl -s -o /dev/null -w "App cua ban: HTTP %{http_code}\n" --max-time 20 "$URL"
+          echo "Bo qua buoc nay."
+
+      - name: 3) Tu gia han de GitHub khong tat lich sau 60 ngay
+        run: |
+          # ❗ CÁI BẪY: GitHub tự TẮT các workflow theo lịch nếu repo
+          #    60 ngày không có commit/hoạt động nào.
+          #    Nên cứ ~45 ngày, ta tự tạo 1 commit nhỏ để giữ lịch chạy.
+          NOW=$(date +%s)
+          FILE=".github/lan-diem-danh-cuoi.txt"
+          LAST=$(cat "$FILE" 2>/dev/null || echo 0)
+          AGE=$(( (NOW - LAST) / 86400 ))
+          echo "Lan commit gia han gan nhat: $AGE ngay truoc"
+
+          if [ "$AGE" -ge 45 ]; then
+            echo "$NOW" > "$FILE"
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "$FILE"
+            git commit -m "Gia han lich diem danh Supabase"
+            git push
+            echo "✅ Da tao commit gia han."
+          else
+            echo "Chua can (con $((45 - AGE)) ngay nua moi toi han)."
+          fi

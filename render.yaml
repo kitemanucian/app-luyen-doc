@@ -1,0 +1,16 @@
+# ============================================================
+# ⚙️ Cấu hình deploy 1-CLICK trên Render.com (Blueprint)
+# Render sẽ tự đọc file này khi bạn kết nối repo GitHub.
+# ============================================================
+services:
+  - type: web
+    name: app-luyen-doc
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free                # đổi thành "starter" nếu muốn chạy 24/7, không bị ngủ
+    healthCheckPath: /cn/tra-tu/%E5%AD%A6   # endpoint nhẹ để Render kiểm tra server sống
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false           # sẽ được hỏi & nhập trên dashboard, KHÔNG lưu vào code
+      - key: ALLOWED_ORIGINS
+        value: "*"            # public rồi nên đổi thành https://app-luyen-doc.onrender.com

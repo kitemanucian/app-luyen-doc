@@ -1,0 +1,31 @@
+# ============================================================
+# 📦 Thư viện Python cho backend FastAPI (bản Anh + Trung)
+# Cài đặt:  pip install -r requirements.txt
+# Sau khi cài, tải thêm mô hình NLP tiếng Anh:
+#           python -m spacy download en_core_web_sm
+# ============================================================
+
+# --- Web framework ---
+fastapi==0.141.1
+uvicorn==0.52.4
+pydantic==2.13.4
+python-multipart==0.0.32
+
+# --- Gọi API bên ngoài (Gemini AI, Google Dịch, MyMemory...) ---
+requests==2.34.2
+
+# --- Xử lý ảnh / PDF / OCR ---
+numpy==2.5.1
+opencv-python-headless==5.0.0.93
+pymupdf==1.28.2
+pytesseract==0.3.13
+
+# --- NLP tiếng Anh (cần tải thêm mô hình en_core_web_sm) ---
+spacy==3.8.13
+
+# --- NLP tiếng Trung ---
+jieba==0.42.1
+pypinyin==0.55.0
+
+# --- Đọc biến môi trường từ file .env (tùy chọn, không bắt buộc) ---
+python-dotenv>=1.0

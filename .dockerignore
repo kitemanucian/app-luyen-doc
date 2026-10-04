@@ -1,0 +1,28 @@
+# Những thứ KHÔNG cần đưa vào Docker image (giúp build nhanh & nhẹ hơn)
+
+# Git & editor
+.git
+.gitignore
+.vscode
+.idea
+
+# Rác macOS (ổ đĩa này tạo rất nhiều file ._*)
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# File sao lưu & log
+*.bak*
+*.log
+tmp/
+
+# Tài liệu hướng dẫn (không cần cho runtime)
+*.md
+pyrightconfig.json
+render.yaml

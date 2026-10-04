@@ -1,0 +1,1594 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App Luyện Đọc Từ Vựng</title>
+    <!-- Các thư viện cần thiết -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <!-- ================================================================
+         🌐 CẤU HÌNH ĐỊA CHỈ BACKEND — KHI DEPLOY CHỈ CẦN XEM KHU VỰC NÀY
+         Toàn bộ code cũ vẫn gọi "http://127.0.0.1:8000/..." như trước và sẽ
+         được tự động chuyển sang địa chỉ bên dưới — KHÔNG phải sửa chỗ nào khác.
+         ================================================================ -->
+    <script>
+        (function () {
+            var GOC_CU = 'http://127.0.0.1:8000';   // backend khi chạy local (giữ nguyên như cũ)
+
+            // Tự nhận diện môi trường:
+            //   - localhost / 127.0.0.1 / mạng LAN / mở file trực tiếp -> dùng backend local
+            //   - tên miền đã deploy                                    -> gọi CÙNG tên miền (đường dẫn tương đối)
+            var ten = location.hostname;
+            var laMayLocal = (ten === 'localhost' || ten === '127.0.0.1' || ten === '')
+                || /^192\.168\./.test(ten) || /^10\./.test(ten) || /^172\.(1[6-9]|2\d|3[01])\./.test(ten);
+
+            // Nếu muốn tách backend ra tên miền riêng, bỏ comment dòng dưới và dán URL:
+            // window.API_BASE = 'https://ten-backend-cua-ban.onrender.com';
+            if (typeof window.API_BASE === 'undefined') window.API_BASE = laMayLocal ? GOC_CU : '';
+
+            // Tự "đổi địa chỉ" cho MỌI lời gọi fetch cũ (không đụng tới code gốc)
+            var fetchGoc = window.fetch.bind(window);
+            window.fetch = function (dauVao, tuyChon) {
+                if (typeof dauVao === 'string' && dauVao.indexOf(GOC_CU) === 0) {
+                    dauVao = window.API_BASE + dauVao.slice(GOC_CU.length);
+                }
+                return fetchGoc(dauVao, tuyChon);
+            };
+        })();
+    </script>
+    
+    
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f9fafb; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        input, textarea, select, button { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #d1d5db; border-radius: 5px; box-sizing: border-box; font-family: inherit; }
+        button { background-color: #2563eb; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background-color: #1d4ed8; }
+        #app-content { display: none; margin-top: 20px; }
+
+        /* Nút chuyển ngôn ngữ */
+        .lang-switch { display: flex; justify-content: center; gap: 10px; margin-bottom: 10px; }
+        .lang-switch a { text-decoration: none; padding: 8px 22px; border-radius: 20px; font-weight: bold; font-size: 14px; border: 2px solid #e5e7eb; color: #6b7280; }
+        .lang-switch a.active { background: #2563eb; color: white; border-color: #2563eb; }
+        
+        /* Hiệu ứng trỏ chuột cho mọi từ vựng */
+        .word-span { cursor: pointer; border-radius: 3px; transition: background-color 0.2s; user-select: none; -webkit-user-select: none; }
+        .word-span:hover { background-color: #e5e7eb; } 
+
+        /* Câu có thể bấm để nghe đọc cả câu */
+        .sentence-span { cursor: pointer; border-radius: 3px; }
+        .sentence-span:hover { background-color: rgba(37, 99, 235, 0.08); }
+        
+        /* 🗣️ Bảng cụm từ / thành ngữ trong bài (tính năng mới) */
+        #cum-tu-panel { display: none; margin-bottom: 20px; background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 6px; padding: 12px 14px; }
+        #cum-tu-title { margin: 0; color: #6d28d9; font-size: 15px; cursor: pointer; user-select: none; }
+        .cumtu-chip { display: inline-flex; align-items: center; gap: 6px; width: auto; background: #fff; color: #6d28d9; border: 1px solid #d8b4fe; border-radius: 999px; padding: 5px 12px; margin: 4px 4px 0 0; font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.15s; }
+        .cumtu-chip:hover { background: #ede9fe; }
+        .cumtu-chip.active { background: #6d28d9; color: #fff; border-color: #6d28d9; }
+        #cum-tu-count { font-size: 12px; color: #7c3aed; font-weight: bold; }
+        #cum-tu-body { display: none; margin-top: 8px; max-height: 240px; overflow-y: auto; padding-right: 6px; line-height: 1.8; }
+        #cum-tu-note { display: none; font-size: 12px; color: #7c3aed; margin-top: 6px; }
+        mark.cumtu-mark { background: rgba(168, 85, 247, 0.18); border-bottom: 2px solid #a855f7; border-radius: 3px; padding: 0 1px; color: inherit; }
+        mark.cumtu-mark .word-span { border-bottom: none !important; }  /* trong cụm được tô, bỏ gạch chân đứt của từ để chỉ còn gạch chân của cả cụm */
+        
+        /* Giao diện Tooltip nổi */
+        #custom-tooltip {
+            position: absolute; background-color: #1f2937; color: #f9fafb; padding: 15px 20px;
+            border-radius: 8px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3); pointer-events: none;
+            z-index: 9999; display: none; max-width: 350px; border: 2px solid #8b5cf6;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="lang-switch">
+        <a href="index.html" class="active">📖 Tiếng Anh</a>
+        <a href="index_trung.html">🇨🇳 中文</a>
+    </div>
+
+    <h1 style="text-align: center; color: #1f2937;">Kho Đọc Tiếng Anh 📖</h1>
+    
+    <!-- KHU VỰC ĐĂNG NHẬP -->
+    <div id="auth-section">
+        <h3>Đăng nhập để vào kho lưu trữ cá nhân</h3>
+        <input type="email" id="email" placeholder="Nhập Email của bạn" required>
+        <input type="password" id="password" placeholder="Nhập Mật khẩu (ít nhất 6 ký tự)" required>
+        <button onclick="signUp()">Đăng ký</button>
+        <button onclick="signIn()" style="background-color: #10b981;">Đăng nhập</button>
+        <p id="auth-message" style="color: red; font-size: 14px;"></p>
+    </div>
+
+    <!-- KHU VỰC NỘI DUNG CHÍNH -->
+    <div id="app-content">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3 id="welcome-msg" style="margin: 0;"></h3>
+            <button onclick="signOut()" style="width: auto; background-color: #ef4444; padding: 5px 15px;">Đăng xuất</button>
+        </div>
+        <hr style="margin: 20px 0;">
+        
+        <!-- FORM NẠP BÀI -->
+        <div style="background: #f3f4f6; padding: 20px; border-radius: 8px;">
+            <h3 style="margin-top: 0;">Nạp bài đọc mới 🤖</h3>
+            <select id="ocr-lang" style="width: 100%; padding: 8px; margin-bottom: 10px; border-radius: 5px; background-color: #ffffff; cursor: pointer;">
+                <option value="eng">🇬🇧 Tiếng Anh</option>
+            </select>
+            <input type="file" id="document-file" accept=".pdf,.docx,.txt,image/*" multiple onchange="handleFileUp(event)">
+            <input type="text" id="article-title" placeholder="Tiêu đề bài đọc..." required>
+            <textarea id="article-content" rows="8" placeholder="Nội dung sẽ hiện ở đây..." required></textarea>
+            <button type="button" onclick="analyzeAndSaveArticle()" style="background-color: #8b5cf6; font-size: 16px;">Tự động phân tích & Lưu bài</button>
+            <p id="ai-status" style="font-weight: bold; display: none; margin-top: 10px;"></p>
+        </div>
+
+        <!-- KHO BÀI-->
+        <div id="reading-section" style="display: block; margin-top: 30px; background: #ffffff; padding: 20px; border-radius: 8px; border: 1px solid #e5e7eb;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="margin: 0; color: #1e40af;">📚 Kho bài đọc</h3>
+                <button onclick="viewNotebook()" style="background: #8b5cf6; width: auto; margin: 0; padding: 8px 15px;">📘 Mở Sổ Tay</button>
+            </div>
+            
+            <input type="text" id="search-bar" onkeyup="filterArticles()" placeholder="🔍 Tìm kiếm bài đọc..." style="background-color: #f8fafc; margin-top: 0;">
+            
+            <!-- Danh sách bài lưu -->
+            <ul id="article-list" style="list-style-type: none; padding: 0; margin: 0; max-height: 250px; overflow-y: auto; border: 1px solid #cbd5e1; border-radius: 5px;"></ul>
+            
+            <hr style="margin: 20px 0; border-top: 1px dashed #cbd5e1;">
+
+            <!-- SỔ TAY -->
+            <div id="notebook-display" style="display: none; padding-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ddd; padding-bottom: 10px; margin-bottom: 15px;">
+                    <h2 style="color: #6d28d9; margin: 0;">📘 Sổ Tay Từ Vựng</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="startFlashcardsFromNotebook()" style="background: #8b5cf6; width: auto; margin: 0; padding: 5px 15px;">🃏 Flashcards</button>
+                        <button onclick="exportNotebookToCSV()" style="background: #10b981; width: auto; margin: 0; padding: 5px 15px;">📥 Xuất Excel</button>
+                        <button onclick="closeNotebook()" style="background: #ef4444; width: auto; margin: 0; padding: 5px 15px;">❌ Đóng</button>
+                    </div>
+                </div>
+                <div id="notebook-content"></div>
+            </div>
+
+            <!-- GIAO DIỆN ĐỌC BÀI -->
+            <div id="article-display" style="display: none;">
+                <h2 id="display-title" style="color: #111827;"></h2>
+                
+                <div style="margin-bottom: 20px; background: #f3f4f6; padding: 12px; border-radius: 6px; display: flex; align-items: center; gap: 10px;">
+                    <label style="font-weight: bold;">🎯 Highlight Từ Vựng:</label>
+                    <select id="level-select" onchange="applyHighlightAndPhrase()" style="width: auto; padding: 8px; cursor: pointer;">
+                        <option value="none">-- Tắt bôi màu --</option>
+                        <option value="ALL">🌟 Tô TẤT CẢ từ vựng B1-C2</option>
+                        <option value="B1">Cấp độ B1 (Xanh lá)</option>
+                        <option value="B2">Cấp độ B2 (Xanh dương)</option>
+                        <option value="C1">Cấp độ C1 (Cam)</option>
+                        <option value="C2">Cấp độ C2 (Đỏ)</option>
+                    </select>
+                    <button id="btn-read-all" onclick="toggleReadAll()" style="background:#3b82f6; width:auto; margin:0; padding:8px 15px;">🔊 Đọc cả bài</button>
+                    <button onclick="showStats()" style="background:#8b5cf6; width:auto; margin:0; padding:8px 15px;">📊 Thống kê</button>
+                    <button onclick="startFlashcardsFromArticle()" style="background:#eab308; width:auto; margin:0; padding:8px 15px;">🃏 Flashcards</button>
+                </div>
+
+                <!-- 🗣️ CỤM TỪ / THÀNH NGỮ TRONG BÀI — bảng con tra cứu nhanh từ file cum_tu_tieng_anh.json -->
+                <div id="cum-tu-panel">
+                    <h3 id="cum-tu-title" onclick="toggleCumTuPanel()">🗣️ Cụm từ / Thành ngữ trong bài <span style="font-size:11px; font-weight:normal; color:#7c3aed;">(bấm để mở)</span></h3>
+                    <span id="cum-tu-count" style="display: block; margin-top: 2px;"></span>
+                    <div id="cum-tu-body"></div>
+                    <div id="cum-tu-note">👉 Bấm 1 cụm từ để xem nghĩa + tô sáng cụm đó trong bài. 🔊 = nghe phát âm cả cụm.</div>
+                </div>
+
+                <!-- Bảng thông tin từ vựng nổi bật ở trên cùng -->
+                <div id="word-info-box" style="display: none; margin-bottom: 20px; background-color: #f0fdf4; border: 1px solid #bbf7d0; padding: 15px; border-radius: 6px; position: relative;">
+                    <button onclick="speakCurrentWord()" style="position: absolute; top: 15px; right: 15px; background: #3b82f6; width: auto; padding: 6px 12px; margin: 0;">🔊 Đọc từ</button>
+                    <h4 id="info-word" style="margin: 0 0 5px 0; color: #15803d; font-size: 18px;"></h4>
+                    <p style="margin: 5px 0; font-size: 14px;"><strong>Từ loại:</strong> <span id="info-pos" style="color: #6d28d9;"></span> | <strong>Phiên âm:</strong> <span id="info-ipa"></span> | <strong>Cấp độ:</strong> <span id="info-level" style="font-weight: bold; color: #b45309;"></span></p>
+                    <p style="margin: 5px 0; font-size: 15px;"><strong>Nghĩa:</strong> <span id="info-meaning"></span></p>
+                    <!-- Họ từ (word family): nhóm biến thể cùng gốc — /word-family trả NGAY từ file tĩnh, không cần mạng -->
+                    <div id="word-family-box" style="display: none; margin-top: 10px; padding-top: 8px; border-top: 1px dashed #bbf7d0; font-size: 14px;">
+                        <strong style="color: #047857;">👨‍👩‍👧‍👦 Họ từ (word family):</strong>
+                        <div id="word-family-members" style="margin-top: 6px; line-height: 1.9;"></div>
+                        <div id="word-family-note" style="font-size: 12px; color: #6b7280;">Bấm 1 từ trong họ để xem chi tiết + nghe phát âm.</div>
+                    </div>
+                    <button id="btn-save-current" onclick="saveCurrentWord()" style="background: #eab308; width: auto; padding: 6px 15px; font-size: 14px; margin-top: 10px; margin-bottom: 0;">⭐ Thêm vào Sổ tay</button>
+                </div>
+
+                <!-- Văn bản bài đọc -->
+                <div id="display-content" style="white-space: pre-wrap; line-height: 1.6; font-size: 16px; margin-bottom: 30px;"></div>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #10b981; padding-bottom: 10px; margin-bottom: 15px;">
+                    <h3 style="color: #047857; margin: 0; cursor: pointer; user-select: none;" onclick="let v = document.getElementById('display-vocab'); v.style.display = v.style.display === 'none' ? 'block' : 'none'; this.innerText = v.style.display === 'none' ? '🧠 Phân tích từ vựng (Nhấp để Mở) 🔽' : '🧠 Phân tích từ vựng (Nhấp để Đóng) 🔼';">🧠 Phân tích từ vựng (Nhấp để Đóng) 🔼</h3>
+                    <button onclick="exportToCSV()" style="background: #10b981; width: auto; padding: 6px 15px; margin: 0;">📥 Xuất Excel (CSV)</button>
+                </div>
+                
+                <!-- Bảng từ vựng đã được đặt trong một khu vực cuộn gọn gàng -->
+                <div id="display-vocab" style="display: block; max-height: 400px; overflow-y: auto; padding-right: 10px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="custom-tooltip"></div>
+
+<!-- Flashcards -->
+<div id="flashcard-modal" style="display:none; position:fixed; inset:0; background:rgba(17,24,39,0.65); z-index:10000; align-items:center; justify-content:center;">
+    <div style="background:#ffffff; border-radius:14px; padding:22px; max-width:480px; width:92%; text-align:center; box-shadow:0 20px 40px rgba(0,0,0,0.3);">
+        <div id="fc-header" style="font-size:14px; color:#6b7280; margin-bottom:8px;"></div>
+        <div id="fc-card" onclick="flipFlashcard()" style="cursor:pointer; border:2px solid #e5e7eb; border-radius:12px; padding:28px 18px; margin:12px 0; min-height:150px; display:flex; flex-direction:column; justify-content:center;"></div>
+        <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+            <button id="fc-know" onclick="flashcardAnswer(true)" style="background:#10b981; width:auto; padding:10px 22px; margin:0;">✓ Đã biết</button>
+            <button id="fc-unknown" onclick="flashcardAnswer(false)" style="background:#ef4444; width:auto; padding:10px 22px; margin:0;">✗ Cần ôn</button>
+            <button onclick="closeFlashcards()" style="background:#6b7280; width:auto; padding:10px 22px; margin:0;">❌ Thoát</button>
+        </div>
+    </div>
+</div>
+
+<!-- Thống kê cấp độ -->
+<div id="stats-modal" style="display:none; position:fixed; inset:0; background:rgba(17,24,39,0.65); z-index:10000; align-items:center; justify-content:center;">
+    <div style="background:#ffffff; border-radius:14px; padding:22px; max-width:460px; width:92%; box-shadow:0 20px 40px rgba(0,0,0,0.3);">
+        <h3 style="margin:0 0 14px 0; color:#111827;">📊 Trình độ từ vựng bài đọc</h3>
+        <div id="stats-body"></div>
+        <button onclick="closeStats()" style="background:#6b7280; width:auto; padding:8px 22px; margin:12px 0 0 0;">❌ Đóng</button>
+    </div>
+</div>
+
+<script>
+    // 1. CẤU HÌNH API
+    const supabaseUrl = 'https://cidflrjpcwmwdlqidayo.supabase.co'; 
+    const supabaseKey = 'sb_publishable_HZ396HoOQ5el1jCkWe-5Mg_w5s-vWNk'; 
+    const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+    // ⚠️ API key Gemini đã được chuyển xuống backend Python (main.py) để không lộ ra trình duyệt.
+    // Mọi cuộc gọi AI giờ đều đi qua http://127.0.0.1:8000/ai-tra-tu
+
+    let userArticlesData = [];
+    let currentVocabData = [];
+    let currentArticleId = null;  // id bài đọc ĐANG MỞ — dùng để lưu ⭐ đúng bài (không so khớp title)
+    let originalContent = "";
+    let levelMap = {};  // bảng cấp độ CEFR cho toàn bộ từ trong bài (nạp từ /lay-cap-do)
+    let lemmaMap = {};  // bản đồ dạng-trong-bài -> gốc từ chuẩn (nạp từ /lay-cap-do) để khớp biến thể phi hình thái
+    let posMap = {};    // bảng TỪ LOẠI tiếng Việt (danh từ/động từ...) cho toàn bộ từ trong bài — /lay-cap-do trả sẵn pos
+    let dangDongBo = false;  // khóa chống đệ quy khi applyHighlight() tự bổ sung từ vào bảng
+    let levelLoadPromise = null;  // Promise nạp bảng cấp độ CEFR — showStats() CHỜ nó để con số thống kê ổn định tuyệt đối
+    
+    // 2. TỪ ĐIỂN TĨNH & DANH SÁCH TỪ CƠ BẢN CẤM TÔ MÀU
+    const STOP_WORDS = new Set(["a", "an", "the", "and", "but", "or", "for", "nor", "on", "at", "to", "from", "by", "with", "of", "in", "is", "are", "was", "were", "am", "be", "been", "being", "it", "its", "they", "their", "them", "he", "his", "him", "she", "her", "we", "our", "us", "i", "my", "me", "you", "your", "this", "that", "these", "those", "can", "could", "shall", "should", "will", "would", "may", "might", "must", "do", "does", "did", "have", "has", "had", "as", "so", "if", "then", "than", "there", "here", "when", "where", "why", "how", "all", "any", "both", "each", "few", "more", "most", "other", "some", "such", "no", "not", "only", "own", "same", "very", "too", "also", "just", "even", "much", "many", "what", "which", "who", "whom", "whose", "because", "while", "until", "about", "into", "through", "after", "before", "over", "under", "between", "out", "against", "during", "without", "up", "down", "off", "above", "below", "need", "take", "make", "find", "know", "see", "get", "go", "come", "think", "look", "say", "tell", "use", "now", "new", "one", "two", "way", "day"]);
+
+    // Hàm nhận diện gốc từ thông minh
+    function generateWordVariants(w) {
+        if (!w || w.length < 2) return [w];
+        w = w.toLowerCase().trim();
+        let forms = new Set([w]);
+        forms.add(w + 's'); forms.add(w + 'es');
+        if (w.endsWith('y')) forms.add(w.slice(0, -1) + 'ies'); 
+        if (w.endsWith('f')) forms.add(w.slice(0, -1) + 'ves'); 
+        if (w.endsWith('fe')) forms.add(w.slice(0, -2) + 'ves'); 
+        forms.add(w + 'd'); forms.add(w + 'ed');
+        if (w.endsWith('y')) forms.add(w.slice(0, -1) + 'ied'); 
+        forms.add(w + 'ing');
+        if (w.endsWith('e')) forms.add(w.slice(0, -1) + 'ing'); 
+        forms.add(w + 'ly');
+        if (w.endsWith('y')) forms.add(w.slice(0, -1) + 'ily'); 
+
+        if (w.length > 3) {
+            if (w.endsWith('ies')) forms.add(w.slice(0, -3) + 'y');
+            if (w.endsWith('ves')) { forms.add(w.slice(0, -3) + 'f'); forms.add(w.slice(0, -3) + 'fe'); }
+            if (w.endsWith('ied')) forms.add(w.slice(0, -3) + 'y');
+            if (w.endsWith('ing')) { forms.add(w.slice(0, -3)); forms.add(w.slice(0, -3) + 'e'); }
+            if (w.endsWith('ed')) { forms.add(w.slice(0, -2)); forms.add(w.slice(0, -1)); }
+            if (w.endsWith('s') && !w.endsWith('ss')) forms.add(w.slice(0, -1)); 
+            if (w.endsWith('es')) forms.add(w.slice(0, -2));
+        }
+        return Array.from(forms);
+    }
+
+    // So khớp 2 từ: bằng nhau HOẶC là biến thể gốc của nhau (houses ~ house, playing ~ play)
+    function cung_tu(a, b) {
+        a = (a || "").toLowerCase().trim(); b = (b || "").toLowerCase().trim();
+        if (!a || !b) return false;
+        if (a === b) return true;
+        return generateWordVariants(a).includes(b) || generateWordVariants(b).includes(a);
+    }
+
+    // 3. TỪ ĐIỂN AI DỰ PHÒNG LƯU TRONG RAM
+    let dynamicDictionary = {}; 
+    async function askAI(word) {
+        if (dynamicDictionary[word]) return dynamicDictionary[word];
+        try {
+            // Gọi backend Python — API key Gemini được giấu kín trong main.py
+            let res = await fetch('http://127.0.0.1:8000/ai-tra-tu', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ word: word, mode: 'nghia' })
+            });
+            if (!res.ok) throw new Error("Backend lỗi");
+            let parsed = await res.json();
+            if (parsed.error) throw new Error(parsed.error);
+            if (!parsed.meaning) throw new Error("Không có nghĩa");
+            dynamicDictionary[word] = parsed; return parsed;
+        } catch (e) {
+            try {
+                let fallRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+                let fallData = await fallRes.json();
+                let ipa = fallData[0].phonetics.find(p => p.text)?.text || "";
+                let mean = "(EN) " + fallData[0].meanings[0].definitions[0].definition;
+                let result = { ipa: ipa.replace(/\//g,''), meaning: mean };
+                dynamicDictionary[word] = result; return result;
+            } catch (err) { return { ipa: "", meaning: "Không tìm thấy dữ liệu từ này." }; }
+        }
+    }
+
+    // 4. CHỨC NĂNG TÀI KHOẢN
+    async function signUp() {
+        const { error } = await supabaseClient.auth.signUp({ email: document.getElementById('email').value, password: document.getElementById('password').value });
+        document.getElementById('auth-message').innerText = error ? error.message : "Đăng ký thành công!";
+    }
+    async function signIn() {
+        const { error } = await supabaseClient.auth.signInWithPassword({ email: document.getElementById('email').value, password: document.getElementById('password').value });
+        error ? document.getElementById('auth-message').innerText = error.message : checkUser();
+    }
+    async function signOut() { await supabaseClient.auth.signOut(); checkUser(); }
+    async function checkUser() {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (user) { document.getElementById('auth-section').style.display = 'none'; document.getElementById('app-content').style.display = 'block'; document.getElementById('welcome-msg').innerText = "Xin chào!"; loadUserArticles(); } 
+        else { document.getElementById('auth-section').style.display = 'block'; document.getElementById('app-content').style.display = 'none'; }
+    }
+
+    // 5. QUẢN LÝ BÀI ĐỌC (BAO GỒM NÚT SỬA)
+    async function loadUserArticles() {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) return;
+        const { data } = await supabaseClient.from('articles').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+        userArticlesData = data || [];
+        const list = document.getElementById('article-list'); list.innerHTML = ''; 
+        if (userArticlesData.length === 0) { list.innerHTML = '<li style="padding:15px;">Kho trống. Nạp bài mới đi nào!</li>'; return; }
+        
+        userArticlesData.forEach(art => {
+
+            list.innerHTML += `<li style="display:flex; justify-content:space-between; align-items:center; padding:12px 15px; border-bottom:1px solid #f1f5f9; transition: background 0.2s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                <span style="font-weight:bold; cursor:pointer; flex-grow:1; color:#374151;" onclick="viewArticle('${art.id}')">📖 ${art.title}</span>
+                <div style="display:flex; gap:8px;">
+                    <button onclick="renameArticle('${art.id}')" style="background:#eab308; padding:5px 10px; font-size:13px; margin:0; width:auto;">✏️ Sửa</button>
+                    <button onclick="deleteArticle('${art.id}')" style="background:#ef4444; padding:5px 10px; font-size:13px; margin:0; width:auto;">🗑️ Xóa</button>
+                </div>
+            </li>`;
+        });
+    }
+    
+    async function renameArticle(articleId) {
+        const article = userArticlesData.find(a => a.id === articleId);
+        if (!article) return;
+        const newTitle = prompt("Nhập tên mới cho bài đọc:", article.title);
+        if (!newTitle || newTitle === article.title) return;
+        await supabaseClient.from('articles').update({ title: newTitle }).eq('id', articleId); 
+        loadUserArticles();
+    }
+
+    async function deleteArticle(id) {
+        if(confirm("Bạn có chắc chắn muốn xóa bài này?")) { await supabaseClient.from('articles').delete().eq('id', id); document.getElementById('article-display').style.display = 'none'; loadUserArticles(); }
+    }
+
+    // 6. NẠP FILE VÀ PHÂN TÍCH (GIAI ĐOẠN 4: PYTHON ĐỌC VÀ DỌN RÁC)
+    async function handleFileUp(e) {
+        let file = e.target.files[0]; 
+        if(!file) return;
+        
+        const msg = document.getElementById('ai-status');
+        msg.style.display = 'block';
+        msg.innerText = "⏳ Đang đọc...";
+        msg.style.color = "#d97706";
+
+        // Đóng gói file để gửi sang máy chủ Python
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+            // Ném file sang cổng 8000
+            const response = await fetch("http://127.0.0.1:8000/doc-tai-lieu", {
+                method: "POST",
+                body: formData
+            });
+
+            if (!response.ok) throw new Error("Máy chủ Python chưa bật hoặc từ chối nhận file!");
+
+            const data = await response.json();
+            
+            if (data.error) throw new Error(data.error);
+
+            // ⚠️ KIỂM TRA NỘI DUNG: nếu Python không lấy được chữ nào (file ảnh scan mờ,
+            // PDF không có lớp chữ, file hỏng...) thì BÁO NGAY thay vì để ô nội dung trống
+            // rồi bấm "Phân tích & Lưu" lại bị kêu "vui lòng nhập nội dung" rất khó hiểu.
+            const textSach = (data.text_sach || "").trim();
+            if (!textSach) {
+                msg.style.color = "red";
+                msg.innerText = "⚠️ Không trích xuất được chữ nào từ file! File có thể là ảnh chụp mờ, PDF chỉ có ảnh (không có lớp chữ) hoặc file hỏng. Hãy thử file khác hoặc dán trực tiếp nội dung vào ô bên dưới.";
+                return;
+            }
+
+            // Đổ văn bản đã được Python dọn sạch sẽ vào khung nội dung
+            document.getElementById('article-content').value = textSach;
+            
+            // Tự động lấy tên file làm tiêu đề nếu ô tiêu đề đang trống
+            const titleInput = document.getElementById('article-title');
+            if (!titleInput.value) {
+                titleInput.value = file.name.replace(/\.[^/.]+$/, ""); // Bỏ đuôi .pdf, .txt
+            }
+
+            msg.innerText = "✅ Đã trích xuất văn bản thành công! " + textSach.length + " ký tự.";
+            msg.style.color = "green";
+            
+        } catch (error) {
+            msg.innerText = "❌ Lỗi: " + error.message;
+            msg.style.color = "red";
+        } finally {
+            // Xóa giá trị input để lần sau chọn lại file cũ vẫn chạy hàm này
+            e.target.value = ""; 
+        }
+    }
+
+   // --- PHÂN TÍCH TỪ VỰNG & LƯU BÀI (GIAI ĐOẠN 3: PYTHON LÀM TRỌN GÓI 100%) ---
+    async function analyzeAndSaveArticle() {
+        const title = document.getElementById('article-title').value.trim(); 
+        const rawContent = document.getElementById('article-content').value.trim();
+        const msg = document.getElementById('ai-status'); 
+        
+        // Báo riêng từng trường để biết rõ cái gì đang thiếu (trước đây gộp chung rất khó đoán)
+        if (!title) return alert("Vui lòng nhập tiêu đề bài báo!");
+        if (!rawContent) return alert("Vui lòng nhập NỘI DUNG bài báo! Nếu bạn vừa upload file, hãy chờ dòng báo \"✅ Đã trích xuất... thành công\" màu XANH ở trên rồi mới bấm nút này.");
+        msg.style.display = 'block'; msg.style.color = "#d97706"; 
+        msg.innerText = "🚀 ĐANG XỬ LÝ... (spaCy + Dịch tự động)...";
+
+        try {
+            // 1. GỬI TOÀN BỘ CHO PYTHON XỬ LÝ
+            const response = await fetch('http://127.0.0.1:8000/phan-tich-bai-doc', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: rawContent })
+            });
+
+            if (!response.ok) throw new Error("Máy chủ Python chưa bật hoặc đang bận!");
+
+            const data = await response.json();
+            const pythonWords = data.tu_vung_quan_trong || [];
+
+            if (pythonWords.length === 0) {
+                msg.style.color = "red"; msg.innerText = "❌ Không tìm thấy từ vựng B1-C2 nào."; return;
+            }
+
+            // 2. NHẬN KẾT QUẢ ĐÃ ĐƯỢC PYTHON DỊCH SẴN VÀ ĐÓNG GÓI LƯU LUÔN
+            let vData = pythonWords.map(item => ({
+                word: item.word,
+                level: item.level,
+                ipa: item.ipa, 
+                meaning: item.meaning, // Nghĩa tiếng Việt Python vừa dịch
+                example: item.example,
+                surfaceForms: [item.word], 
+                is_saved: false
+            }));
+
+            msg.innerText = "✅ Python đã xử lý xong! Đang lưu vào cơ sở dữ liệu...";
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            
+            await supabaseClient.from('articles').insert([{ user_id: user.id, title, content: rawContent.trim(), vocab_data: vData }]);
+            
+            msg.style.color = "green"; msg.innerText = "🎉 Hoàn tất!"; 
+            document.getElementById('article-title').value = ''; document.getElementById('article-content').value = ''; 
+            loadUserArticles();
+
+        } catch (error) {
+            msg.style.color = "red"; msg.innerText = "❌ Lỗi: " + error.message;
+        }
+    }
+
+    // Định dạng lại văn bản bài đọc khi hiển thị: bỏ header PDF (Passage N, tiêu đề lặp),
+    // tách đoạn theo nhãn A-J. QUY TẮC AN TOÀN: chỉ sửa từng DÒNG hoặc nhãn A-J — KHÔNG bao giờ
+    // ăn mất chữ của đoạn văn. Trước đây regex Passage dùng "(.+?)\1" quét trên cả văn bản nên
+    // khi Header PDF lặp dạng "Tiêu đề 2 Tiêu đề" thì phần đầu đoạn A bị hiểu nhầm là header và
+    // bị XÓA — các bài cũ hiển thị mất nửa đầu đoạn A.
+    function formatArticleText(text) {
+        if (!text) return "";
+        let t = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+        // ---------- 1. Bỏ header PDF (từng dòng, tuyệt đối an toàn) ----------
+        let cacDong = t.split("\n").map(function(dong) {
+            dong = dong.trim();
+            // Dạng "Tiêu đề 3 Tiêu đề" lặp trong cùng 1 dòng
+            dong = dong.replace(/^(.{8,}?)\s+\d+\s+\1$/i, "");
+            // Bỏ tiền tố "Passage 3" / "Reading Passage 3" ở đầu dòng (giữ nguyên phần còn lại)
+            dong = dong.replace(/^\s*(Reading\s+)?Passage\s+\d+\s*:?/i, "");
+            return dong;
+        });
+        // Bỏ dòng "1 Tiêu đề" lặp lại tiêu đề đã xuất hiện ngay phía trên (kiểu PDF trích lặp)
+        let dongTruoc = null;
+        cacDong = cacDong.filter(function(dong) {
+            let dongSach = dong.trim();
+            // Bỏ phần số ở đầu dòng "1 Tiêu đề" rồi so với dòng trước để phát hiện lặp
+            let dongSo = dongSach.replace(/^\d+\s+/, "");
+            let giong = (dongSach !== "" && (dongSach === dongTruoc || (dongSo && dongSo === dongTruoc)));
+            if (dongSach) dongTruoc = dongSach;
+            return !giong;
+        });
+        t = cacDong.join("\n");
+
+        // ---------- 2. Tách đoạn theo nhãn A-J (kiểu đề IELTS) ----------
+        // a) Nhãn đứng đầu dòng riêng: "A\nText..." -> "A. Text..."
+        t = t.replace(/^([A-J])[.\s]*\n(?=[A-Z0-9'"‘“])/gm, "$1. ");
+        // b) Nhãn nằm giữa câu: "...text. A Next..." -> "...text.\n\nA. Next..."
+        // ⚠️ CHỈ tách khi nhãn A-J đứng SAU DẤU CÂU kết thúc câu (".", "!", "?") — không bao giờ sau
+        // chữ thường/số. Trước đây nhóm bắt chứa [a-z0-9] nên MỌI cụm "chữ thường A-J chữ hoa"
+        // (vd "in A City", "to A Place", "is A Great") đều bị chèn "\n\n" giữa câu — văn bản nát bấy.
+        // Nay chỉ tách sau dấu câu và sau nhãn phải là chữ hoa nên an toàn tuyệt đối.
+        t = t.replace(/([.!?]['"”’]?)\s*([A-J])\s*\.?\s+(?=[A-Z'"‘“])/g, "$1\n\n$2. ");
+
+        // ---------- 3. Gộp nhãn bị tách khỏi câu mở đầu bằng từ nối ----------
+        // (Đã BỎ bước tách "However" thành đoạn riêng — tính năng đó làm văn bản phân mảnh
+        //  thành các đoạn không nhãn không đẹp. Chỉ giữ bước gộp ngược cho trường hợp hiếm:)
+        // Nếu nhãn "D." bị tách khỏi câu mở đầu bằng từ nối thì gộp lại: "D.\n\nHowever" -> "D. However"
+        t = t.replace(/^([A-J])\.\s*\n(However|Furthermore|Moreover|In addition|Consequently|Therefore|Meanwhile|Ultimately|In conclusion|First|Secondly|Finally|In contrast|On the other hand)\b/gim, "$1. $2");
+
+        // ---------- 4. Dọn dẹp ----------
+        t = t.replace(/[ \t]+\n/g, "\n");
+        t = t.replace(/\n{3,}/g, "\n\n");
+        return t.trim();
+    }
+
+    // 7. HIỂN THỊ BÀI ĐỌC
+    async function viewArticle(id) {
+        const art = userArticlesData.find(a => a.id === id); if (!art) return;
+        currentArticleId = id;  // 📌 ghi nhớ id bài đang mở — saveCurrentWord() lưu ⭐ đúng bài này
+        document.getElementById('article-display').style.display = 'block'; document.getElementById('display-title').innerText = art.title;
+        
+        // Định dạng lại văn bản (xóa header PDF, tách đoạn A-J) — XEM hàm formatArticleText bên trên
+        originalContent = formatArticleText(art.content || "");
+
+        // 🧹 RESET BẢNG CẤP ĐỘ THEO TỪNG BÀI — bug cũ giữ levelMap/lemmaMap dính từ bài mở
+        // trước, khiến từ vựng của bài cũ bị cộng dồn vào bảng & tô màu của bài mới (từ trong
+        // bảng nhưng không có trong bài → không tô được màu, thống kê lệch bảng).
+        levelMap = {};
+        lemmaMap = {};
+        posMap = {};   // từ loại cũng reset theo từng bài — không dính dữ liệu bài mở trước
+        levelLoadPromise = null;
+
+        const contentDiv = document.getElementById('display-content'); contentDiv.innerText = originalContent; contentDiv.removeAttribute('data-wrapped');
+        
+        // 🧹 LỌC RÁC NGAY KHI MỞ BÀI: bài cũ bị bug "Tô TẤT CẢ" nhét CẢ từ A1/A2 vào bảng
+        // (tô nhầm thành màu đỏ C2) và có thể đã LƯU NGƯỢC Supabase. Chỉ giữ đúng dải B1-C2.
+        currentVocabData = (art.vocab_data || []).filter(v => v && v.word && !/\bA[12]\b/i.test(String(v.level || '').trim()) && !/^Cơ bản$/i.test(String(v.level || '').trim()));
+        currentVocabData.sort((a, b) => (a.level || "").localeCompare(b.level || ""));
+        renderVocabTable();
+        
+        document.getElementById('level-select').value = 'none'; 
+        applyHighlight();
+        syncVocabRows();
+        // Nạp cấp độ CEFR cho TOÀN BỘ từ trong bài — bài cũ tô màu chuẩn hơn, tooltip hiện đủ cấp độ
+        await loadLevels(originalContent.split(/\s+/));
+        // 🔄 Bổ sung TOÀN BỘ từ B1-C2 có trong bài vào bảng (không phải chờ bấm "tô màu" bảng mới đủ)
+        // — thống kê luôn khớp bảng. Đồng thời xóa nốt rác A1/A2 còn sót.
+        const thayDoi = boSungBangTuVung();
+        renderVocabTable();
+        syncVocabRows();
+        if (thayDoi) {
+            // Lưu ngược để bài cũ TỰ SẠCH VĨNH VIỄN — mở 1 lần là hết rác A1/A2 trong DB
+            await supabaseClient.from('articles').update({ vocab_data: currentVocabData }).eq('id', id);
+            const artCapNhat = userArticlesData.find(a => a.id === id);
+            if (artCapNhat) artCapNhat.vocab_data = currentVocabData;
+        }
+        // 🔧 VÁ DỮ LIỆU TRỐNG: bài cũ lẫn bài mới đều tra ĐỒNG LOẠT (IPA/cấp độ/nghĩa/ví dụ)
+        // rồi LƯU NGƯỢC Supabase — bài cũ mở 1 lần là sửa vĩnh viễn, không cần tải lại bài mới.
+        repairVocabData(id);
+        // 🗣️ Tìm cụm từ / thành ngữ có trong bài (đọc file tĩnh, không cần mạng) rồi hiện chip phía trên
+        timCumTuCuaBai();
+    }
+
+    // 🔄 BỔ SUNG BẢNG TỪ VỰNG SAU KHI levelMap NẠP XONG: đưa TOÀN BỘ từ B1-C2 có trong bài vào
+    // bảng (không phải chờ bấm "tô màu" mới thấy đủ), đồng thời XÓA dòng rác A1/A2 do bug cũ
+    // đưa vào. Trả về true nếu có thay đổi → viewArticle lưu ngược Supabase để bài cũ tự sửa vĩnh viễn.
+    function boSungBangTuVung() {
+        let thayDoi = false;
+        // 1. Xóa dòng rác A1/A2 (bug cũ tô màu 'ALL' đưa vào và có thể đã lưu nhầm vào DB)
+        const sach = currentVocabData.filter(v => v && v.word && !/\bA[12]\b/i.test(String(v.level || '').trim()) && !/^Cơ bản$/i.test(String(v.level || '').trim()));
+        if (sach.length !== currentVocabData.length) thayDoi = true;
+        currentVocabData = sach;
+        // 1b. Xóa dòng KHÔNG THUỘC BÀI ĐỌC NÀY — bug cũ KHÔNG reset levelMap/lemmaMap khi mở bài
+        // khác nên từ B1-C2 của bài trước bị cộng dồn vào bảng bài sau (có từ trong bảng nhưng
+        // không có trong bài → không tô được màu, thống kê lệch bảng), rồi lưu nhầm vào DB.
+        // Chỉ chạy khi bảng cấp độ đã nạp xong (nếu mạng lỗi levelMap rỗng thì giữ nguyên bảng
+        // cũ, không xóa nhầm từ hợp lệ của bài).
+        const daNapCapDo = Object.keys(levelMap || {}).length > 0;
+        if (daNapCapDo) {
+            const lemmaSet = new Set(Object.values(lemmaMap || {}));
+            // Từ thuộc bài đọc = có trong levelMap (bảng cấp độ của CHÍNH bài này) hoặc là gốc từ
+            // (lemma) của một từ trong bài — bảng luôn lưu theo gốc từ nên phải khớp cả 2 nguồn.
+            const laTuCuaBai = (w) => Boolean(levelMap[w] || lemmaSet.has(w));
+            const cuaBai = currentVocabData.filter(v => v && v.word && laTuCuaBai(String(v.word).toLowerCase()));
+            if (cuaBai.length !== currentVocabData.length) thayDoi = true;
+            currentVocabData = cuaBai;
+        }
+        // 2. Bổ sung từ B1-C2 trong bài chưa có trong bảng (theo levelMap nạp từ /lay-cap-do)
+        const daCo = new Set(currentVocabData.map(v => (v.word || '').toLowerCase()));
+        Object.keys(levelMap || {}).forEach(f => {
+            const lv = String(levelMap[f] || '').trim();
+            // 🎯 CHỈ từ thuộc dải B1-C2 — KHÔNG đưa A1/A2 vào bảng nữa (kể cả cấp độ kép "A2-B1")
+            if (/\bA[12]\b/.test(lv) || !/B1|B2|C1|C2/.test(lv) || STOP_WORDS.has(f) || daCo.has(f)) return;
+            // Khớp theo GỐC TỪ (lemma): bài có "opulence" mà bảng đã có "opulent" thì không thêm trùng
+            const lem = (lemmaMap || {})[f] || f;
+            if (daCo.has(lem)) return;
+            currentVocabData.push({ word: lem, level: lv, ipa: '', meaning: '', example: '', surfaceForms: [f], is_saved: false, audio: '' });
+            daCo.add(lem);
+            thayDoi = true;
+        });
+        // 3. Sắp xếp theo cấp độ cho gọn
+        currentVocabData.sort((a, b) => String(a.level || '').localeCompare(String(b.level || '')));
+        return thayDoi;
+    }
+
+    // Dựng lại toàn bộ bảng từ vựng (dùng ở viewArticle và khi applyHighlight bổ sung từ mới vào bài)
+    function renderVocabTable() {
+        const vocabBox = document.getElementById('display-vocab'); vocabBox.innerHTML = '';
+        currentVocabData.forEach((v, i) => {
+            let isValidMean = (v.meaning && !v.meaning.includes("Đang cập nhật"));
+            let meanDisplay = isValidMean ? v.meaning : `<span id="mean-warn-${i}" style="color:#ef4444; font-weight:bold;">⏳ Đang tự động tra nghĩa...</span>`;
+            
+            // Nút đọc đã được thêm width: auto; margin: 0; để không bị kéo dài
+            vocabBox.innerHTML += `<div style="margin-bottom:15px; padding:10px; background:#f0fdf4; border-left:4px solid #22c55e; position:relative;">
+                <button onclick="speakWord('${(v.word||'').replace(/'/g, "\\'")}')" style="position:absolute; top:10px; right:10px; width:auto; margin:0; padding:4px 10px; font-size:13px;">🔊 Đọc</button>
+                <div style="font-weight:bold; font-size:18px; color:#166534;">${v.word} <span id="pos-badge-${i}" style="background:#8b5cf6; color:white; padding:2px 6px; border-radius:5px; font-size:12px;">${v.pos || posMap[String(v.word).toLowerCase()] || ""}</span> <span style="font-size:14px; color:#6b7280; font-weight:normal;" id="ipa-warn-${i}">/ ${v.ipa||""} /</span> <span id="level-badge-${i}" style="background:#22c55e; color:white; padding:2px 6px; border-radius:5px; font-size:12px;">${v.level||""}</span></div>
+                <div style="margin-top:5px; color:#374151;">👉 <b>Nghĩa:</b> <span id="mean-display-${i}">${meanDisplay}</span></div>
+                ${v.example ? `<div style="margin-top:5px; color:#4b5563; font-style:italic;">📝 <b>Ví dụ:</b> <span id="example-display-${i}">${v.example}</span></div>` : ""}
+            </div>`;
+        });
+    }
+
+    // Bổ sung dữ liệu còn thiếu (phiên âm/nghĩa/cấp độ) cho bảng từ vựng — /tra-tu trả NGAY;
+    // nghĩa tiếng Việt nạp riêng qua /nghia nếu vẫn trống (ví dụ không còn bắt buộc)
+    function syncVocabRows() {
+        currentVocabData.forEach((v, i) => {
+            let thieu_du_lieu = !v.ipa || !v.meaning || v.meaning.includes("Đang cập nhật");
+            if (!thieu_du_lieu) return;
+
+            // Ưu tiên cấp độ CEFR đã nạp sẵn trong levelMap (chuẩn hơn dữ liệu cũ)
+            if ((!v.level || v.level === "Cơ bản") && levelMap[v.word]) {
+                v.level = levelMap[v.word];
+                let badge = document.getElementById(`level-badge-${i}`);
+                if (badge) badge.innerText = v.level;
+            }
+
+            fetchWithTimeout(`http://127.0.0.1:8000/tra-tu/${encodeURIComponent(v.word)}`)
+                .then(r => (r && r.ok) ? r.json() : null)
+                .then(d => {
+                    if (!d) return;
+                    if (!v.ipa && d.ipa) {
+                        v.ipa = d.ipa;
+                        let el = document.getElementById(`ipa-warn-${i}`);
+                        if (el) el.innerText = `/ ${d.ipa} /`;
+                    }
+                    if (!v.meaning || v.meaning.includes("Đang cập nhật")) {
+                        if (d.meaning && !d.meaning.includes("Đang cập nhật")) {
+                            v.meaning = d.meaning;
+                            let el = document.getElementById(`mean-display-${i}`);
+                            if (el) el.innerHTML = d.meaning;
+                        }
+                        // Nghĩa còn thiếu -> để repairVocabData() tra ĐỒNG LOẠT (nhanh hơn nhiều so với từng từ)
+                    }
+                    // Đồng bộ TỪ LOẠI (pos) — /tra-tu trả sẵn; nạp cả posMap để tooltip + họ từ dùng chung
+                    if (!v.pos && d.pos) {
+                        v.pos = d.pos;
+                        posMap[v.word] = d.pos;
+                        let el = document.getElementById(`pos-badge-${i}`);
+                        if (el) el.innerText = d.pos;
+                    }
+                    // Đồng bộ CẤP ĐỘ theo bảng CEFR (CSV) để màu tô + badge khớp với tooltip
+                    if (d.level && v.level !== d.level) {
+                        v.level = d.level;
+                        levelMap[v.word] = d.level;
+                        let badge = document.getElementById(`level-badge-${i}`);
+                        if (badge) badge.innerText = d.level;
+                        applyHighlight();
+                    }
+                })
+                .catch(() => {});
+        });
+    }
+
+    // 7.5 NẠP CẤP ĐỘ CEFR HÀNG LOẠT (CHO MỌI TỪ TRONG BÀI) — BÀI CŨ KHÔNG CẦN PHÂN TÍCH LẠI
+    // Dữ liệu từ backend /lay-cap-do (bảng CSV 9.936 từ), dùng để tô màu + tooltip chính xác
+    async function loadLevels(words) {
+        if (!words || words.length === 0) return;
+        let cleanWords = words.map(w => w.toLowerCase().replace(/[^a-zA-Zà-ỹ']/g, "")).filter(w => w.length >= 3 && !STOP_WORDS.has(w));
+        if (cleanWords.length === 0) return;
+        // 📌 Ghi lại Promise nạp bảng cấp độ để showStats() có thể CHỜ — hết cảnh bấm sớm thấy 2 từ C2,
+        // bấm muộn (sau khi applyHighlight bổ sung từ) lại thấy 5 từ C2. Con số giờ ổn định tuyệt đối.
+        const task = (async () => {
+            try {
+                let res = await fetchWithTimeout('http://127.0.0.1:8000/lay-cap-do', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ words: cleanWords })
+                });
+                if (!res.ok) return;
+                let data = await res.json();
+                Object.assign(levelMap, data.levels || {});
+                Object.assign(lemmaMap, data.lemmas || {});   // surface -> gốc từ chuẩn để khớp biến thể phi hình thái
+                Object.assign(posMap, data.pos || {});        // surface -> từ loại tiếng Việt (nạp kèm từ /lay-cap-do)
+                // Đồng bộ cấp độ cho CẢ gốc từ (vd bài có "opulence" -> levelMap["opulent"] cũng có cấp độ)
+                Object.keys(lemmaMap).forEach(s => {
+                    let lem = lemmaMap[s];
+                    if (lem && lem !== s && !levelMap[lem] && levelMap[s]) levelMap[lem] = levelMap[s];
+                    // Từ loại cũng theo gốc từ (vd bài có "houses" -> posMap["house"] cũng có)
+                    if (lem && lem !== s && !posMap[lem] && posMap[s]) posMap[lem] = posMap[s];
+                });
+                // Cập nhật cấp độ cho các từ đã có trong bảng từ vựng
+                currentVocabData.forEach(v => {
+                    if (levelMap[v.word] && v.level !== levelMap[v.word]) {
+                        v.level = levelMap[v.word];
+                    }
+                });
+                // ✅ Tô màu LẠI khi đã nạp xong bảng cấp độ — hết cảnh user chọn cấp độ quá sớm
+                // (levelMap chưa nạp xong) làm "bảng phân tích có từ nhưng bài không tô màu".
+                if (document.getElementById('level-select').value !== 'none') {
+                    applyHighlight();
+                }
+        } catch (e) {}
+        })();
+        levelLoadPromise = task;
+        await task;
+    }
+
+    // Nạp nghĩa tiếng Việt qua /nghia (chạy NỀN, không bao giờ chặn hiển thị IPA/cấp độ).
+    // Nếu backend trả rỗng (mạng Google lỗi tạm thời) thì TỰ THỬ LẠI tối đa 3 lần, mỗi lần cách 3s
+    // — hết cảnh kẹt vĩnh viễn "⏳ Đang tải nghĩa".
+    async function fillMeaning(w, lan_thu = 0) {
+        try {
+            // Nghĩa 1 từ giờ có thể chạy Google -> MyMemory dự phòng nên cho tới 30s (thay vì 7s cắt ngang giữa chừng)
+            let res = await fetchWithTimeout(`http://127.0.0.1:8000/nghia/${encodeURIComponent(w)}`, {}, 30000);
+            if (!res.ok) { if (lan_thu < 3) setTimeout(() => fillMeaning(w, lan_thu + 1), 3000); return; }
+            let data = await res.json();
+            let meaning = (data.meaning || "").trim();
+            if (!meaning) { if (lan_thu < 3) setTimeout(() => fillMeaning(w, lan_thu + 1), 3000); return; }
+
+            // Cập nhật tooltip nếu vẫn đang hiển thị từ này (khớp cả biến thể: houses ~ house)
+            if (tooltip.style.display === 'block' && cung_tu(tooltipWord, w)) {
+                tooltip.innerHTML = tooltipHtml(tooltip.dataset.word || tooltipWord, tooltip.dataset.ipa || "", tooltip.dataset.level || "", meaning, tooltip.dataset.pos || "");
+            }
+            // Cập nhật bảng chi tiết nếu đang hiển thị từ này (khớp cả biến thể)
+            let infoWord = document.getElementById('info-word');
+            if (infoWord && cung_tu(infoWord.innerText, w)) {
+                document.getElementById('info-meaning').innerText = meaning;
+            }
+            // Cập nhật dòng từ vựng trong bảng phân tích (khớp cả biến thể)
+            let idx = currentVocabData.findIndex(v => cung_tu(v.word, w));
+            if (idx !== -1) {
+                currentVocabData[idx].meaning = meaning;
+                let el = document.getElementById(`mean-display-${idx}`);
+                if (el) el.innerHTML = meaning;
+            }
+        } catch (e) {}
+    }
+
+    // 🔧 VÁ DỮ LIỆU TRỐNG CHO MỌI BÀI ĐỌC (cũ lẫn mới): tra ĐỒNG LOẠT IPA/cấp độ/nghĩa/ví dụ
+    // rồi LƯU NGƯỢC Supabase — bài cũ mở 1 lần là được sửa VĨNH VIỄN, không cần tải lại bài mới.
+    async function repairVocabData(articleId) {
+        if (!currentVocabData || currentVocabData.length === 0) return;
+        // Gom các dòng còn thiếu dữ liệu (nghĩa trống/"Đang cập nhật", IPA trống, cấp độ "Cơ bản")
+        let canSua = [];
+        currentVocabData.forEach((v, i) => {
+            let thieu = !v.ipa || !v.meaning || v.meaning.includes("Đang cập nhật") || v.meaning === "Không thể dịch tự động." || !v.level || v.level === "Cơ bản";
+            if (thieu) canSua.push(i);
+        });
+        if (canSua.length === 0) return;
+        let words = [...new Set(canSua.map(i => (currentVocabData[i].word || "").toLowerCase()))].filter(Boolean);
+        if (words.length === 0) return;
+
+        try {
+            // Vá dữ liệu hàng loạt có thể chạy Google + dự phòng MyMemory nên cho tới 60s (thay vì 7s)
+            let res = await fetchWithTimeout('http://127.0.0.1:8000/tu-dien-ho-tro', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ words })
+            }, 60000);
+            if (!res.ok) return;
+            let data = await res.json();
+            let results = data.results || {};
+            let thayDoi = false;
+
+            canSua.forEach(i => {
+                let v = currentVocabData[i];
+                let kq = results[(v.word || "").toLowerCase()] || results[v.word];
+                if (!kq) return;
+                if (kq.meaning && !kq.meaning.includes("Đang cập nhật")) { v.meaning = kq.meaning; }
+                if (kq.ipa) { v.ipa = kq.ipa; }
+                if (kq.level) { v.level = kq.level; levelMap[v.word] = kq.level; }
+                if (kq.example) { v.example = kq.example; }
+                if (kq.audio && !v.audio) { v.audio = kq.audio; }
+                if (kq.pos && !v.pos) { v.pos = kq.pos; posMap[v.word] = kq.pos; }   // từ loại cũng vá cho bài cũ
+                thayDoi = true;
+
+                // Cập nhật DOM ngay
+                let el = document.getElementById(`mean-display-${i}`);
+                if (el) el.innerHTML = v.meaning || el.innerHTML;
+                let ipaEl = document.getElementById(`ipa-warn-${i}`);
+                if (ipaEl) ipaEl.innerText = v.ipa ? `/ ${v.ipa} /` : ipaEl.innerText;
+                let lvlEl = document.getElementById(`level-badge-${i}`);
+                if (lvlEl) lvlEl.innerText = v.level;
+                let posEl = document.getElementById(`pos-badge-${i}`);
+                if (posEl && v.pos) posEl.innerText = v.pos;
+                // Nếu bảng chi tiết đang hiển thị chính từ này thì cập nhật luôn
+                let infoWord = document.getElementById('info-word');
+                if (infoWord && cung_tu(infoWord.innerText, v.word)) {
+                    if (v.meaning) document.getElementById('info-meaning').innerText = v.meaning;
+                    if (v.ipa) document.getElementById('info-ipa').innerText = v.ipa;
+                    if (v.level) document.getElementById('info-level').innerText = v.level;
+                    if (v.pos) document.getElementById('info-pos').innerText = v.pos;
+                }
+            });
+
+            // LƯU NGƯỢC LẠI CƠ SỞ DỮ LIỆU — bài cũ tự sửa VĨNH VIỄN
+            if (thayDoi && articleId) {
+                await supabaseClient.from('articles').update({ vocab_data: currentVocabData }).eq('id', articleId);
+                // Cập nhật luôn bản ghi trong bộ nhớ — mở lại là có sẵn ngay, không cần chờ mạng
+                let art = userArticlesData.find(a => a.id === articleId);
+                if (art) art.vocab_data = currentVocabData;
+            }
+        } catch (e) {}
+    }
+
+    // Màu tô theo cấp độ CEFR — A1/A2 hoặc cấp độ chưa rõ trả 'transparent' (KHÔNG tô màu,
+    // tránh nhầm thành màu đỏ C2 như bug cũ vì hàm màu không có nhánh A1/A2).
+    function mauTheoCapDo(level) {
+        level = String(level || '').trim();
+        // ⛔ Tuyệt đối KHÔNG tô màu A1/A2 (kể cả cấp độ kép như "A1-A2"/"A2-B1" nếu dữ liệu có)
+        // — A1/A2 luôn trả 'transparent' để không bao giờ rơi vào màu ĐỎ C2 như bug cũ.
+        if (/\bA[12]\b/.test(level)) return 'transparent';
+        if (level.includes('B1')) return '#86efac';
+        if (level.includes('B2')) return '#93c5fd';
+        if (level.includes('C1')) return '#fdba74';
+        if (level.includes('C2')) return '#fca5a5';
+        return 'transparent';
+    }
+
+    // 8. TÔ MÀU HIGHLIGHT 
+    function applyHighlight() {
+        const lvl = document.getElementById('level-select').value; const div = document.getElementById('display-content');
+        if (!originalContent) return;
+        
+        if (!div.hasAttribute('data-wrapped')) { 
+            div.innerHTML = wrapEnglishSentences(originalContent); 
+            div.setAttribute('data-wrapped', 'true'); 
+        }
+
+        let map = {};
+        let tuBoSung = [];  // từ BỔ SUNG vừa được tô màu — sẽ được đưa vào bảng phân tích ngay
+        if (lvl !== 'none') {
+            let target = lvl === 'ALL' ? currentVocabData : currentVocabData.filter(i => i.level && i.level.includes(lvl));
+            target.forEach(item => {
+                let idx = currentVocabData.indexOf(item);
+                // Gộp CẢ dạng đã lưu (surfaceForms) LẪN biến thể hình thái (s/es/ed/ing/ly...)
+                // — trước đây bài mới lưu surfaceForms = [từ gốc] nên các biến thể như leavened,
+                // decorated, architects... không khớp map và KHÔNG được tô màu dù có trong bảng.
+                let cac_dang = new Set([...(item.surfaceForms || []), ...generateWordVariants(item.word)]);
+                cac_dang.forEach(f => {
+                    if (f && !STOP_WORDS.has(f.toLowerCase())) map[f.toLowerCase()] = { item, idx };
+                });
+            });
+            // 🔥 BỔ SUNG: ghép thêm từ B1-C2 CHƯA nằm trong bảng phân tích nhưng có trong bảng cấp độ CEFR
+            // (levelMap nạp từ /lay-cap-do) — bài cũ không cần phân tích lại vẫn tô đúng màu.
+            // Đồng thời ĐƯA từ bổ sung VÀO BẢNG PHÂN TÍCH (thay vì chỉ tô màu) để có đủ
+            // phiên âm + nghĩa — tô màu cấp độ nào thì có dòng trong bảng cấp độ đó.
+            Object.keys(levelMap).forEach(f => {
+                const lvBoi = String(levelMap[f] || '').trim();
+                // 🎯 CHỈ tô từ thuộc dải B1-C2 (bỏ A1/A2) — trước đây chọn "ALL" tô CẢ A1/A2 và vì
+                // hàm màu không có nhánh A1/A2 nên mọi từ A1/A2 rơi vào màu ĐỎ C2 (184 từ trong
+                // bài đọc này!) và bị nhét cả vào bảng phân tích.
+                if (!lvBoi || /\bA[12]\b/.test(lvBoi) || !/B1|B2|C1|C2/.test(lvBoi) || STOP_WORDS.has(f) || map[f]) return;
+                // String(...).includes(lvl) để bắt cả cấp độ kép trong CSV (vd "C1-C2")
+                if (lvl === 'ALL' || lvBoi.includes(lvl)) {
+                    // Nếu GỐC TỪ (lemma) của dạng này đã có sẵn trong bảng (vd bài có "opulence"
+                    // mà bảng đã có "opulent") thì KHÔNG tạo dòng trùng — chỉ tô màu khớp vào
+                    // dòng gốc đã có để bảng phân tích + màu tô luôn nhất quán.
+                    const goc = ((lemmaMap || {})[f] || f).toLowerCase();
+                    const dongCoSan = currentVocabData.find(v => (v.word || '').toLowerCase() === goc);
+                    if (dongCoSan) {
+                        map[f] = { item: dongCoSan, idx: currentVocabData.indexOf(dongCoSan) };
+                        return;
+                    }
+                    map[f] = { item: { word: f, level: lvBoi, surfaceForms: [f] }, idx: -1 };
+                    if (!currentVocabData.some(v => (v.word || '').toLowerCase() === f)) {
+                        currentVocabData.push({
+                            word: f, level: lvBoi, ipa: '', meaning: '', example: '',
+                            surfaceForms: [f], is_saved: false, audio: ''
+                        });
+                        tuBoSung.push(f);
+                    }
+                }
+            });
+            // 🔥 BỔ SUNG THEO GỐC TỪ (lemma): khớp NHỮNG biến thể phi hình thái mà quy tắc thêm
+            // đuôi không liệt kê nổi (vd bài có "opulence" trong khi bảng có "opulent", bài có
+            // "allegedly" còn bảng có "alleged"). /lay-cap-do trả bản đồ dạng-trong-bài -> gốc từ
+            // chuẩn (spaCy lemmatize) nên khớp CHÍNH XÁC với từ trong bảng phân tích, kể cả khi CSV
+            // cấp độ không có dạng biến thể đó.
+            Object.keys(lemmaMap || {}).forEach(surface => {
+                if (!surface || STOP_WORDS.has(surface) || map[surface]) return;
+                let lem = lemmaMap[surface];
+                if (!lem || lem === surface) return;
+                let item = target.find(it => (it.word || '').toLowerCase() === lem);
+                if (item) map[surface] = { item, idx: currentVocabData.indexOf(item) };
+            });
+        }
+        
+        div.querySelectorAll('.word-span').forEach(span => {
+            let entry = map[span.getAttribute('data-word').toLowerCase()];
+            if (lvl !== 'none' && entry) {
+                // A1/A2 hoặc cấp độ chưa rõ → mauTheoCapDo trả 'transparent': KHÔNG tô màu
+                // (không bao giờ rơi vào fallback màu đỏ C2 như bug cũ)
+                let color = mauTheoCapDo(entry.item.level);
+                if (color === 'transparent') {
+                    span.style.background = 'transparent'; span.style.borderBottom = 'none'; span.removeAttribute('data-index');
+                } else {
+                    span.style.background = color; span.style.borderBottom = '2px dashed #374151'; span.setAttribute('data-index', entry.idx);
+                }
+            } else { 
+                span.style.background = 'transparent'; span.style.borderBottom = 'none'; span.removeAttribute('data-index'); 
+            }
+        });
+
+        // Từ BỔ SUNG vừa được tô màu -> dựng lại bảng từ vựng và nạp NGAY IPA + nghĩa cho chúng
+        // (không còn cảnh "tô màu nhưng bảng phân tích không có dòng / không hiện phiên âm, nghĩa").
+        if (tuBoSung.length && !dangDongBo) {
+            dangDongBo = true;
+            renderVocabTable();
+            syncVocabRows();
+            tuBoSung.forEach(w => fillMeaning(w));
+            dangDongBo = false;
+        }
+    }
+
+   // 9. CẢM BIẾN CHUỘT THÔNG MINH (CHIA LUẬT HOVER VÀ CLICK)
+    const contentDiv = document.getElementById('display-content'); 
+    const tooltip = document.getElementById('custom-tooltip');
+    let currentlySelectedWordIndex = -1;
+    let liveDict = {}; 
+    let currentDetailWord = '';   // từ đang hiển thị trong bảng chi tiết (kể cả khi bấm từ trong họ từ)
+    let currentDetailAudio = '';  // audio của từ đó — để nút 🔊 Đọc từ vẫn đọc đúng khi duyệt họ từ
+    // 🗣️ CỤM TỪ / THÀNH NGỮ TRONG BÀI — dữ liệu /tim-cum-tu trả về + cụm đang tô sáng
+    let cumTuCuaBai = [];
+    let cumTuDangChon = '';
+    let cumTuFetchSeq = 0;   // số thứ tự lần quét — bỏ kết quả cũ khi chuyển bài nhanh
+
+    const NET_TIMEOUT = 7000; // Cắt mạng sau 7 giây để không bao giờ treo "Đang tra"
+    let hoverTimer = null;
+
+    // Tìm dữ liệu từ vựng đã có sẵn trong bài (không cần gọi mạng).
+    // Khớp cả BIẾN THỂ: hover/bấm "houses" vẫn tìm thấy dòng "house" trong bài.
+    function findLocalData(w) {
+        w = (w || "").toLowerCase();
+        return currentVocabData.find(v => v.word.toLowerCase() === w) 
+            || currentVocabData.find(v => (v.surfaceForms || []).map(s => s.toLowerCase()).includes(w)) 
+            || currentVocabData.find(v => cung_tu(v.word, w))
+            || (lemmaMap[w] && currentVocabData.find(v => (v.word || '').toLowerCase() === lemmaMap[w]))
+            || null;
+    }
+
+    // Gọi API có giới hạn thời gian (không treo vô hạn). Mặc định NET_TIMEOUT;
+    // truyền timeoutMs riêng cho các API dịch (Google 429 -> phải chờ dự phòng MyMemory).
+    async function fetchWithTimeout(url, options, timeoutMs) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs || NET_TIMEOUT);
+        try {
+            return await fetch(url, { ...options, signal: controller.signal });
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    // Dựng HTML tooltip (từ + TỪ LOẠI + phiên âm + cấp độ + nghĩa) — ví dụ không còn cần thiết
+    function tooltipHtml(word, ipa, level, meaning, pos) {
+        let ipaHtml = ipa ? `<span style="font-size:14px; color:#9ca3af; font-weight:normal;">/ ${ipa} /</span>` : "";
+        let lvlHtml = level ? `<span style="font-size:12px; background:#374151; padding:2px 6px; border-radius:4px; margin-left: 5px;">${level}</span>` : "";
+        let posHtml = pos ? `<span style="font-size:12px; background:#8b5cf6; color:white; padding:2px 6px; border-radius:4px; margin-left:5px;">${pos}</span>` : "";
+        let meanHtml = meaning ? `👉 <b>Nghĩa:</b> ${meaning}` : "";
+        return `<div style="font-size:20px; font-weight:bold; color:#fde047;">${word} ${ipaHtml} ${lvlHtml} ${posHtml}</div>
+                <div style="font-size:15px; margin-top:5px;">${meanHtml}</div>`;
+    }
+
+    // Từ đang hiển thị trong tooltip — để cập nhật nghĩa đúng chỗ khi /nghia trả về
+    let tooltipWord = '';
+
+    // Hàm gọi API và hiển thị Tooltip (hiện dữ liệu sẵn có NGAY, mạng bổ sung sau — không bao giờ chặn)
+    async function showTooltipData(w, x, y) {
+        tooltipWord = w;
+        tooltip.style.left = x + 'px'; tooltip.style.top = y + 'px';
+        tooltip.style.display = 'block';
+
+        // 1. HIỆN NGAY dữ liệu đã có sẵn: từ trong bài + cấp độ CEFR (levelMap) — 0 giây chờ mạng
+        let local = findLocalData(w);
+        let ipa = (local && local.ipa) || "";
+        let meaning = (local && local.meaning && !local.meaning.includes("Đang cập nhật")) ? local.meaning : "";
+        // levelMap ưu tiên dạng xuất hiện; nếu chưa có thì lấy cấp độ theo GỐC TỪ (lemma)
+        // — hover biến thể phi hình thái (vd "opulence") vẫn hiện đúng cấp độ của từ trong bảng.
+        let level = levelMap[w] || (lemmaMap[w] && levelMap[lemmaMap[w]]) || (local && local.level) || "";
+        // Từ loại (pos): ưu tiên dạng xuất hiện, dự phòng theo gốc từ (lemma) — /lay-cap-do trả sẵn
+        let pos = posMap[w] || (lemmaMap[w] && posMap[lemmaMap[w]]) || (local && local.pos) || "";
+        tooltip.innerHTML = tooltipHtml(local ? local.word : w, ipa, level, meaning, pos);
+        tooltip.dataset.word = local ? local.word : w;
+        tooltip.dataset.ipa = ipa; tooltip.dataset.level = level; tooltip.dataset.pos = pos;
+
+        // 2. Lấy bổ sung từ /tra-tu (có cache; TRẢ NGAY kể cả từ ngoài từ điển — không còn chờ API ngoài)
+        if (!liveDict[w]) {
+            try {
+                let res = await fetchWithTimeout(`http://127.0.0.1:8000/tra-tu/${encodeURIComponent(w)}`);
+                if (res.ok) liveDict[w] = await res.json();
+            } catch (err) { console.log("Lỗi tra từ nhanh:", err); }
+        }
+
+        // 3. Nếu đã lướt sang từ khác rồi thì bỏ qua
+        if (tooltipWord !== w) return;
+
+        // 4. Cập nhật IPA / cấp độ ngay khi có — nghĩa do /nghia nạp NỀN (không chặn tooltip)
+        let d = liveDict[w];
+        if (d) {
+            if (d.ipa) tooltip.dataset.ipa = d.ipa;
+            if (d.level) { tooltip.dataset.level = d.level; levelMap[w] = d.level; }
+            if (d.pos) { tooltip.dataset.pos = d.pos; posMap[w] = d.pos; }
+            let m = (d.meaning && !d.meaning.includes("Đang cập nhật")) ? d.meaning : meaning;
+            tooltip.innerHTML = tooltipHtml(d.word || tooltip.dataset.word, tooltip.dataset.ipa, tooltip.dataset.level, m, tooltip.dataset.pos);
+            if (!m) fillMeaning(d.word || w);   // nghĩa nạp nền — không chặn tooltip
+        } else if (!meaning) {
+            fillMeaning(w);
+        }
+    }
+
+    // A. KHI LƯỚT CHUỘT (HOVER) -> HIỆN TOOLTIP CHO **MỌI** TỪ (kể cả từ không tô màu), trì hoãn 400ms
+    contentDiv.addEventListener('mouseover', function(e) {
+        if (e.target.classList.contains('word-span')) {
+            let w = e.target.getAttribute('data-word').toLowerCase();
+            let x = e.pageX + 15, y = e.pageY + 15;
+            clearTimeout(hoverTimer);
+            hoverTimer = setTimeout(() => showTooltipData(w, x, y), 400);
+        }
+    });
+
+    contentDiv.addEventListener('mousemove', function(e) {
+        if (ctrlPressed) {
+            // 🎹 Đang giữ Ctrl: cập nhật tooltip theo từ dưới con trỏ (không đọc to ở đây)
+            const w = wordUnderPointer(e.clientX, e.clientY);
+            if (w) showTooltipData(w, e.pageX + 15, e.pageY + 15);
+        }
+        if (tooltip.style.display === 'block') {
+            let x = e.pageX + 15, y = e.pageY + 15; 
+            if (x + tooltip.offsetWidth > window.innerWidth) x = e.pageX - tooltip.offsetWidth - 10; 
+            tooltip.style.left = x + 'px'; tooltip.style.top = y + 'px';
+        }
+    });
+    
+    contentDiv.addEventListener('mouseleave', () => { clearTimeout(hoverTimer); if (!ctrlPressed) tooltip.style.display = 'none'; });
+    contentDiv.addEventListener('mouseout', (e) => { if (e.target.classList.contains('word-span')) { clearTimeout(hoverTimer); if (!ctrlPressed) tooltip.style.display = 'none'; } });
+
+    // B. KHI BẤM CHUỘT (CLICK) -> HIỆN BẢNG CHI TIẾT + ĐỌC ÂM THANH
+    //    IPA + ví dụ hiện NGAY (từ /tra-tu, không còn chờ Google dịch); nghĩa nạp nền qua /nghia
+    contentDiv.addEventListener('click', async function(e) {
+        if (e.target.classList.contains('word-span')) {
+            let w = e.target.getAttribute('data-word').toLowerCase();
+            let clickedSurface = w;  // dạng từ vừa bấm (vd: houses) để lưu surfaceForms
+
+            // 1. HIỆN TOOLTIP NGAY (kể cả từ không được tô màu)
+            let x = e.pageX + 15, y = e.pageY + 15;
+            showTooltipData(w, x, y);
+
+            // 2. ĐỔ NGAY DỮ LIỆU ĐÃ CÓ TRONG BÀI + CẤP ĐỘ CEFR (levelMap) — không chờ mạng
+            let local = findLocalData(w);
+            document.getElementById('word-info-box').style.display = 'block';
+            document.getElementById('info-word').innerText = local ? local.word : w;
+            document.getElementById('info-level').innerText = (levelMap[w] || (lemmaMap[w] && levelMap[lemmaMap[w]]) || (local && local.level) || "Chưa rõ");
+            document.getElementById('info-meaning').innerText = (local && local.meaning && !local.meaning.includes("Đang cập nhật")) ? local.meaning : "⏳ Đang tải nghĩa...";
+            document.getElementById('info-ipa').innerText = (local && local.ipa) || "";
+            document.getElementById('info-pos').innerText = posMap[w] || (lemmaMap[w] && posMap[lemmaMap[w]]) || (local && local.pos) || "";
+
+            // 3. LẤY DỮ LIỆU CHÍNH THỨC TỪ /tra-tu (IPA + cấp độ hiện TỨC THÌ vì không chờ Google dịch)
+            if (!liveDict[w]) {
+                try {
+                    let res = await fetchWithTimeout(`http://127.0.0.1:8000/tra-tu/${encodeURIComponent(w)}`);
+                    if (res.ok) liveDict[w] = await res.json();
+                } catch (err) { console.log("Lỗi tra từ nhanh:", err); }
+            }
+            let d = liveDict[w];
+
+            // 4. Đổ dữ liệu lên bảng chi tiết
+            if (d) {
+                if (d.ipa) document.getElementById('info-ipa').innerText = d.ipa;
+                if (d.level) { document.getElementById('info-level').innerText = d.level; levelMap[w] = d.level; }
+                if (d.pos) document.getElementById('info-pos').innerText = d.pos;
+                if (d.meaning && !d.meaning.includes("Đang cập nhật")) {
+                    document.getElementById('info-meaning').innerText = d.meaning;
+                }
+                speakWord(d.word, d.audio);
+                w = d.word;  // dùng từ chuẩn (đã gọt gốc: houses -> house) cho các bước sau
+            } else {
+                speakWord(w, "");
+            }
+
+            // 4b. HỌ TỪ (word family): tra nhóm từ cùng gốc từ FILE TĨNH — trả NGAY, không chờ mạng
+            hienThiHoTu(w);
+
+            // 5. GÁN TỪ VÀO MẢNG THEO TÊN TỪ (tránh lẫn dữ liệu giữa các từ)
+            // 🛡️ CHỈ ĐƯA VÀO BẢNG TỪ VỰNG các từ B1-C2 — từ A1/A2 vẫn hiện hộp tra nghĩa + đọc
+            // âm thanh nhưng KHÔNG thêm vào bảng (bảng là "từ vựng B1-C2" nên từ cơ bản không bao
+            // giờ được tô màu → để vào bảng sẽ làm bảng lệch với màu tô và thống kê).
+            let capDoBamVao = (d && d.level) || levelMap[w] || (lemmaMap[w] && levelMap[lemmaMap[w]]) || "";
+            if (capDoBamVao && /\bA[12]\b/.test(String(capDoBamVao).trim())) {
+                currentlySelectedWordIndex = -1;
+                document.getElementById('btn-save-current').style.display = 'none';
+                return;
+            }
+            let saveBtn = document.getElementById('btn-save-current');
+            saveBtn.style.display = 'inline-block'; // LUÔN LUÔN HIỆN NÚT LƯU
+            let existingIdx = currentVocabData.findIndex(v => v.word.toLowerCase() === w);
+            if (existingIdx !== -1) {
+                let item = currentVocabData[existingIdx];
+                if (d) {
+                    if (d.ipa) item.ipa = d.ipa;
+                    if (d.example) item.example = d.example;
+                    if (d.level) item.level = d.level;
+                }
+                currentlySelectedWordIndex = existingIdx;
+                saveBtn.innerText = item.is_saved ? "⭐ Đã có trong Sổ tay" : "⭐ Thêm Sổ tay";
+                saveBtn.disabled = item.is_saved;
+            } else {
+                currentVocabData.push({
+                    word: w, level: (d && d.level) || levelMap[w] || "", ipa: (d && d.ipa) || (local && local.ipa) || "",
+                    meaning: (d && d.meaning) || (local && local.meaning) || "", example: (d && d.example) || (local && local.example) || "",
+                    surfaceForms: [clickedSurface], is_saved: false, audio: (d && d.audio) || ""
+                });
+                currentlySelectedWordIndex = currentVocabData.length - 1;
+                saveBtn.innerText = "⭐ Thêm Sổ tay";
+                saveBtn.disabled = false;
+            }
+
+            // 6. NGHĨA CHƯA CÓ -> nạp nền qua /nghia (không chặn bảng, không chặn âm thanh)
+            let infoMeaning = document.getElementById('info-meaning').innerText;
+            if (!infoMeaning || infoMeaning.includes("Đang cập nhật")) {
+                fillMeaning(w);
+            }
+
+            // (Đã bỏ bước tạo ví dụ bằng AI — ví dụ không còn cần thiết, tránh chờ tới 7s)
+            return;
+        }
+
+        // 🔊 MỚI: bấm vào câu (khoảng trống/ngoài từ đã tô) → đọc cả câu
+        const sentenceEl = e.target.closest('.sentence-span');
+        if (sentenceEl) speakSentence(sentenceEl.innerText);
+    });
+
+    // ============================================================
+    // 9.4 👨‍👩‍👧‍👦 HỌ TỪ (WORD FAMILY) — NHÓM TỪ CÙNG GỐC HIỂN THỊ TRONG BẢNG CHI TIẾT
+    // ============================================================
+    // /word-family trả 1 mảng các member, mỗi member dạng ["success", "danh từ"]:
+    // phần tử 0 = TỪ, phần tử 1 = TỪ LOẠI tiếng Việt (đã có sẵn trong file tĩnh).
+    async function hienThiHoTu(tu) {
+        const box = document.getElementById('word-family-box');
+        const members = document.getElementById('word-family-members');
+        const note = document.getElementById('word-family-note');
+        if (!box || !members || !tu) return;
+        box.style.display = 'block';
+        members.innerHTML = '⏳ Đang tra...';
+        if (note) note.style.display = 'block';
+        try {
+            const res = await fetchWithTimeout(`http://127.0.0.1:8000/word-family/${encodeURIComponent(tu)}`, {}, 6000);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const duLieu = await res.json();
+            const giaDinh = (duLieu && duLieu.family) || [];
+            if (!giaDinh.length) {
+                box.style.display = 'none';   // từ này không có họ từ -> ẩn hẳn, không để tiêu đề trống
+                if (note) note.style.display = 'none';
+                return;
+            }
+            const dangChon = String(tu).toLowerCase();
+            members.innerHTML = giaDinh.map(m => {
+                const w = String(m && m[0] ? m[0] : '').toLowerCase();
+                const p = (m && m[1]) || '';
+                if (!w) return '';
+                const mau = (w === dangChon)
+                    ? 'background:#059669; color:white;'
+                    : 'background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;';
+                return `<button type="button" onclick="moChiTietHoTu('${w.replace(/'/g, "\\'")}')"
+                    style="cursor:pointer; ${mau} border-radius:20px; padding:3px 12px; margin:2px 5px 0 0;
+                    font-size:13px; border:none; width:auto;">${w}${p ? ' · ' + p : ''}</button>`;
+            }).join('');
+        } catch (e) {
+            box.style.display = 'none';   // mạng lỗi thì ẩn hẳn, không làm xấu giao diện
+        }
+    }
+
+    // Bấm 1 từ trong họ → hiện CHI TIẾT (từ loại/phiên âm/cấp độ/nghĩa) + đọc từ đó NGAY trong bảng
+    async function moChiTietHoTu(w) {
+        w = (w || '').toLowerCase().trim();
+        if (!w) return;
+        document.getElementById('info-word').innerText = w;
+        document.getElementById('info-pos').innerText = '';
+        document.getElementById('info-ipa').innerText = '';
+        document.getElementById('info-level').innerText = '...';
+        document.getElementById('info-meaning').innerText = '⏳ Đang tải nghĩa...';
+        // Từ thuộc họ từ thường KHÔNG nằm trong bảng từ vựng của bài -> ẩn nút lưu để không lưu nhầm
+        document.getElementById('btn-save-current').style.display = 'none';
+        currentlySelectedWordIndex = -1;
+        currentDetailWord = w; currentDetailAudio = '';
+        hienThiHoTu(w);   // tô đậm đúng từ vừa bấm trong họ
+        let d = null;
+        try {
+            const res = await fetchWithTimeout(`http://127.0.0.1:8000/tra-tu/${encodeURIComponent(w)}`, {}, 6000);
+            if (res.ok) d = await res.json();
+        } catch (e) {}
+        if (d) {
+            const tuChuan = d.word || w;
+            if (d.ipa) document.getElementById('info-ipa').innerText = d.ipa;
+            if (d.level) document.getElementById('info-level').innerText = d.level;
+            if (d.pos) document.getElementById('info-pos').innerText = d.pos;
+            const m = (d.meaning && !d.meaning.includes('Đang cập nhật')) ? d.meaning : '';
+            if (m) document.getElementById('info-meaning').innerText = m;
+            speakWord(tuChuan, d.audio);
+            currentDetailWord = tuChuan; currentDetailAudio = d.audio || '';
+            if (tuChuan !== w) hienThiHoTu(tuChuan);  // từ chuẩn khác dạng bấm (houses -> house) thì tô lại họ
+            if (!m) fillMeaning(tuChuan);
+        } else {
+            speakWord(w, '');
+            fillMeaning(w);
+        }
+    }
+
+    // ============================================================
+    // 9.5 🎹 BÀN PHÍM + BẤM GIỮ CHUỘT (ĐỌC LẠI TỪ / CHỈ TAY)
+    // ============================================================
+    let ctrlPressed = false;         // đang giữ Ctrl (chế độ "chỉ tay" đọc lại từ)
+    let ctrlRepeatTimer = null;      // bấm giữ Ctrl -> tự đọc lại liên tục
+    let holdTimer = null;            // đếm ngược để phát hiện bấm GIỮ chuột (600ms)
+    let holdReadTimer = null;        // vòng lặp đọc lại khi đang bấm giữ chuột
+    let isLongPressActive = false;   // đang trong trạng thái long-press
+    let lastMouse = { clientX: 0, clientY: 0, pageX: 0, pageY: 0 };
+
+    // Theo dõi vị trí chuột toàn màn hình (bàn phím không có clientX đáng tin cậy)
+    window.addEventListener('mousemove', function(e) {
+        lastMouse = { clientX: e.clientX, clientY: e.clientY, pageX: e.pageX, pageY: e.pageY };
+    });
+
+    // Tìm từ .word-span nằm dưới con trỏ (theo toạ độ màn hình)
+    function wordUnderPointer(clientX, clientY) {
+        if (clientX == null || clientY == null) return null;
+        try {
+            const el = document.elementFromPoint(clientX, clientY);
+            const span = (el && el.closest) ? el.closest('.word-span') : null;
+            if (!span) return null;
+            const w = (span.getAttribute('data-word') || '').toLowerCase();
+            return w || null;
+        } catch (err) { return null; }
+    }
+
+    // Đọc lại 1 từ: hiện tooltip + đọc to (dùng cho Ctrl / long-press)
+    function readWordNow(w, pos) {
+        if (!w) return;
+        const x = (pos && pos.pageX != null) ? pos.pageX + 15 : window.innerWidth / 2;
+        const y = (pos && pos.pageY != null) ? pos.pageY + 15 : 90;
+        showTooltipData(w, x, y);
+        speakWord(w, "");
+    }
+
+    // Chế độ bấm GIỮ Ctrl: cứ 1 giây đọc lại từ đang trỏ (kể cả khi rê chuột)
+    function startCtrlRepeat() {
+        stopCtrlRepeat();
+        const doRead = () => {
+            const w = wordUnderPointer(lastMouse.clientX, lastMouse.clientY);
+            if (w) readWordNow(w, lastMouse);
+        };
+        doRead();
+        ctrlRepeatTimer = setInterval(doRead, 1000);
+    }
+    function stopCtrlRepeat() {
+        if (ctrlRepeatTimer) { clearInterval(ctrlRepeatTimer); ctrlRepeatTimer = null; }
+    }
+
+    document.addEventListener('keydown', function(e) {
+        const tag = (e.target && e.target.tagName) || '';
+        const dangGoChu = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable));
+
+        // Ctrl + Shift + B: đọc lại từ đang trỏ (bỏ qua nếu đang gõ trong ô nhập)
+        if (e.ctrlKey && e.shiftKey && (e.key === 'B' || e.key === 'b')) {
+            e.preventDefault();
+            if (e.repeat || dangGoChu) return;
+            ctrlPressed = true;
+            const w = wordUnderPointer(lastMouse.clientX, lastMouse.clientY)
+                || (currentlySelectedWordIndex !== -1 ? currentVocabData[currentlySelectedWordIndex].word : '');
+            if (w) readWordNow(w, lastMouse);
+            return;
+        }
+        // Bấm GIỮ Ctrl: vào chế độ "chỉ tay" — đọc lại từ đang trỏ liên tục
+        if (e.key === 'Control' && !ctrlPressed && !dangGoChu && !e.shiftKey) {
+            ctrlPressed = true;
+            startCtrlRepeat();
+        }
+    });
+    document.addEventListener('keyup', function(e) {
+        if (e.key === 'Control') { ctrlPressed = false; stopCtrlRepeat(); }
+    });
+
+    // Bấm GIỮ chuột 1 từ (0.6s) -> tự đọc lại từ đó liên tục
+    contentDiv.addEventListener('mousedown', function(e) {
+        if (e.button !== 0) return;
+        const span = e.target.closest('.word-span');
+        if (!span) return;
+        e.preventDefault();  // 🛡️ chặn tiện ích chọn text / long-press của trình duyệt
+        const w = (span.getAttribute('data-word') || '').toLowerCase();
+        if (!w) return;
+        clearTimeout(holdTimer); clearInterval(holdReadTimer); holdReadTimer = null;
+        isLongPressActive = false;
+        holdTimer = setTimeout(() => {
+            isLongPressActive = true;
+            readWordNow(w, { pageX: e.pageX, pageY: e.pageY });
+            holdReadTimer = setInterval(() => speakWord(w, ""), 1200);
+        }, 600);
+    });
+    // Nhả chuột (ở bất kỳ đâu) -> dừng vòng đọc + chặn click thường 1 lần nếu vừa long-press
+    window.addEventListener('mouseup', function() {
+        clearTimeout(holdTimer); clearInterval(holdReadTimer); holdReadTimer = null;
+        if (isLongPressActive) {
+            const stopClick = (ev) => { ev.preventDefault(); ev.stopPropagation(); contentDiv.removeEventListener('click', stopClick, true); };
+            contentDiv.addEventListener('click', stopClick, true);
+            setTimeout(() => contentDiv.removeEventListener('click', stopClick, true), 300);
+            isLongPressActive = false;
+        }
+    });
+    contentDiv.addEventListener('mouseleave', function() {
+        clearTimeout(holdTimer); clearInterval(holdReadTimer); holdReadTimer = null;
+        isLongPressActive = false;
+    });
+
+    // 10. CÁC HÀM TIỆN ÍCH (ĐỌC CHỮ, XUẤT CSV, SỔ TAY)
+    function speakWord(t, audioUrl) {
+        // Dừng âm thanh đang phát (đọc cả bài / câu / từ khác) trước khi đọc từ mới
+        stopSpeech();
+        // Ưu tiên file mp3 phát âm chuẩn Oxford (nếu có); phát lỗi thì quay về giọng Google/TTS
+        if (audioUrl) {
+            let a = new Audio(audioUrl);
+            a.play().catch(() => speakTTS(t));
+        } else {
+            speakTTS(t);
+        }
+    }
+    function speakTTS(t) { speakGoogleTTS(t, 'en-US', 1); }
+    function speakCurrentWord() {
+        if (currentlySelectedWordIndex !== -1) speakWord(currentVocabData[currentlySelectedWordIndex].word);
+        // Duyệt họ từ không nằm trong bảng từ vựng -> đọc từ đang hiển thị trong bảng chi tiết
+        else if (currentDetailWord) speakWord(currentDetailWord, currentDetailAudio);
+    }
+    
+    async function saveCurrentWord() { 
+        if(currentlySelectedWordIndex === -1) return; 
+        // 🛡️ LƯU THEO ID BÀI ĐANG MỞ — KHÔNG so khớp title. Trước đây tìm bài bằng
+        // userArticlesData.find(a=>a.title===display-title) → nếu 2 bài trùng title hoặc vừa sửa
+        // title thì lưu nhầm/sai id → F5 refresh là từ ⭐ biến mất khỏi Sổ tay.
+        if (!currentArticleId) { alert("Chưa có bài đọc nào đang mở!"); return; }
+        currentVocabData[currentlySelectedWordIndex].is_saved = true; 
+        document.getElementById('btn-save-current').innerText = "⏳ Đang lưu..."; 
+        try {
+            await supabaseClient.from('articles').update({vocab_data: currentVocabData}).eq('id', currentArticleId); 
+            document.getElementById('btn-save-current').innerText = "⭐ Đã có"; document.getElementById('btn-save-current').disabled = true; 
+            // Cập nhật ngay bản ghi trong bộ nhớ — bấm "Mở Sổ Tay" thấy từ mới lưu NGAY, không cần F5
+            let art = userArticlesData.find(a => a.id === currentArticleId);
+            if (art) art.vocab_data = currentVocabData;
+        } catch (e) {
+            currentVocabData[currentlySelectedWordIndex].is_saved = false;
+            document.getElementById('btn-save-current').innerText = "❌ Lưu thất bại — thử lại";
+            document.getElementById('btn-save-current').disabled = false;
+        }
+    }
+    
+    function exportToCSV() {
+        if (!currentVocabData || currentVocabData.length === 0) return alert("Không có từ vựng để xuất!");
+        let csvContent = "\uFEFFTừ vựng,Phiên âm,Cấp độ,Nghĩa,Ví dụ\n";
+        currentVocabData.forEach(row => { csvContent += `"${row.word||''}","${row.ipa||''}","${row.level||''}","${(row.meaning||'').replace(/"/g, '""')}","${(row.example||'').replace(/"/g, '""')}"\n`; });
+        const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }));
+        link.download = `TuVung_${document.getElementById('display-title').innerText}.csv`; link.click();
+    }
+
+    function viewNotebook() { 
+        document.getElementById('reading-section').children[1].style.display='none'; document.getElementById('article-list').style.display='none'; document.getElementById('article-display').style.display='none'; document.getElementById('notebook-display').style.display='block'; 
+        let nb = document.getElementById('notebook-content'); nb.innerHTML=''; 
+        let hasWords = false;
+        userArticlesData.forEach(a => { 
+            if(!a.vocab_data) return; 
+            let saved = a.vocab_data.filter(v=>v.is_saved); 
+            if(saved.length>0) { 
+                hasWords = true;
+                nb.innerHTML+=`<h3 style="background:#e0e7ff; padding:10px; margin-top: 15px;">${a.title}</h3>`; 
+                saved.forEach(v => nb.innerHTML+=`<div style="margin-bottom:10px; padding:10px; background:#fffbeb; border-left:4px solid #f59e0b;"><b>${v.word}</b> /${v.ipa}/<br>👉 ${v.meaning}</div>`); 
+            } 
+        }); 
+        if(!hasWords) nb.innerHTML = "<p>Sổ tay trống!</p>";
+    }
+    
+    function closeNotebook() { 
+        document.getElementById('notebook-display').style.display='none'; document.getElementById('reading-section').children[1].style.display='block'; document.getElementById('article-list').style.display='block'; 
+    }
+    
+    function exportNotebookToCSV() {
+        let csvContent = "\uFEFFBài học,Từ vựng,Phiên âm,Cấp độ,Nghĩa,Ví dụ\n"; let hasWords = false;
+        userArticlesData.forEach(article => {
+            if (!article.vocab_data) return;
+            article.vocab_data.filter(v => v.is_saved).forEach(row => {
+                hasWords = true;
+                csvContent += `"${article.title}","${row.word||''}","${row.ipa||''}","${row.level||''}","${(row.meaning||'').replace(/"/g, '""')}","${(row.example||'').replace(/"/g, '""')}"\n`;
+            });
+        });
+        if (!hasWords) return alert("Sổ tay trống!");
+        const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }));
+        link.download = `SoTayTuVung.csv`; link.click();
+    }
+    
+    function filterArticles() { let q = document.getElementById('search-bar').value.toLowerCase(); Array.from(document.getElementById('article-list').children).forEach(li => li.style.display = li.innerText.toLowerCase().includes(q) ? "flex" : "none"); }
+
+    // ============================================================
+    // 11. 🔊 ĐỌC CÂU / ĐOẠN + GIỌNG GOOGLE TTS
+    // ============================================================
+    const READ_LANG = 'en-US';
+    const READ_RATE = 1;
+    let currentAudio = null;
+    let isReadingAll = false;
+
+    function resetReadAllButton() {
+        isReadingAll = false;
+        const b = document.getElementById('btn-read-all');
+        if (b) b.innerText = '🔊 Đọc cả bài';
+    }
+    function stopSpeech() {
+        window.speechSynthesis.cancel();
+        if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+        resetReadAllButton();
+    }
+    function speakSynthesis(t, lang, rate) {
+        const u = new SpeechSynthesisUtterance(t);
+        u.lang = lang; u.rate = rate;
+        window.speechSynthesis.speak(u);
+    }
+    // Giọng "thật" Google TTS cho văn bản ngắn (từ/câu ≤ 180 ký tự); dài hơn dùng giọng máy
+    function speakGoogleTTS(t, lang, rate) {
+        const clean = (t || '').trim();
+        if (!clean) return;
+        stopSpeech();
+        if (clean.length <= 180) {
+            const audio = new Audio(`https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(clean)}&tl=${lang}&client=tw-ob`);
+            currentAudio = audio;
+            audio.onended = () => { if (currentAudio === audio) currentAudio = null; };
+            audio.play().catch(() => { if (currentAudio === audio) currentAudio = null; speakSynthesis(clean, lang, rate); });
+        } else speakSynthesis(clean, lang, rate);
+    }
+    function speakSentence(t) { speakGoogleTTS(t, READ_LANG, READ_RATE); }
+    function toggleReadAll() {
+        const b = document.getElementById('btn-read-all');
+        if (!b) return;
+        if (isReadingAll) { stopSpeech(); return; }
+        const text = (originalContent || '').trim();
+        if (!text) return;
+        stopSpeech();
+        isReadingAll = true;
+        b.innerText = '⏹ Dừng đọc';
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = READ_LANG; u.rate = READ_RATE;
+        u.onend = u.onerror = resetReadAllButton;
+        window.speechSynthesis.speak(u);
+    }
+    // Bọc mỗi câu tiếng Anh trong .sentence-span (bên trong vẫn có .word-span để bấm từ)
+    // ⚠️ QUAN TRỌNG: phải TRẢ LẠI NGUYÊN VẸN khoảng trắng sau dấu câu (kể cả \n\n ngắt đoạn).
+    // Trước đây regex "([.!?])\s+" ăn luôn cả dòng trống ngắt đoạn và thay bằng 1 khoảng trắng
+    // → bài đọc hiển thị đoạn văn DÍNH LIỀN nhau (chỉ bên tiếng Anh bị; bên Trung không dính vì
+    // cắt câu theo dấu "。！？" mà không nuốt khoảng trắng).
+    function wrapEnglishSentences(text) {
+        const re = /([.!?])(\s+)/g;
+        let out = '', last = 0, m;
+        const wrapWords = (s) => s.replace(/([a-zA-Zà-ỹ]+)/g, `<span class="word-span" data-word="$1">$1</span>`);
+        while ((m = re.exec(text)) !== null) {
+            const sentence = text.slice(last, m.index + 1);
+            if (sentence.trim()) out += `<span class="sentence-span">${wrapWords(sentence)}</span>`;
+            out += m[2];  // trả lại NGUYÊN VẸN khoảng trắng/dòng trống sau dấu câu
+            last = re.lastIndex;
+        }
+        if (last < text.length) {
+            const sentence = text.slice(last);
+            if (sentence.trim()) out += `<span class="sentence-span">${wrapWords(sentence)}</span>`;
+        }
+        return out;
+    }
+
+    // ============================================================
+    // 12. 🃏 FLASHCARDS
+    // ============================================================
+    let fcDeck = [], fcPos = 0, fcKnown = 0, fcTotal = 0, fcFlipped = false;
+    function startFlashcardsFromArticle() { startFlashcards(currentVocabData.filter(v => v && v.word)); }
+    function startFlashcardsFromNotebook() {
+        const words = [];
+        userArticlesData.forEach(a => (a.vocab_data || []).forEach(v => { if (v.is_saved && v.word) words.push(v); }));
+        startFlashcards(words);
+    }
+    function startFlashcards(words) {
+        words = (words || []).filter(v => v && v.word);
+        if (words.length === 0) { alert("Chưa có từ nào để ôn! Hãy bấm ⭐ để lưu từ vào Sổ tay trước."); return; }
+        fcDeck = words.map(v => ({ word: v.word, ipa: v.ipa || '', meaning: v.meaning || '', level: v.level || '', example: v.example || '' }));
+        for (let i = fcDeck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [fcDeck[i], fcDeck[j]] = [fcDeck[j], fcDeck[i]]; }
+        fcPos = 0; fcKnown = 0; fcTotal = fcDeck.length; fcFlipped = false;
+        document.getElementById('flashcard-modal').style.display = 'flex';
+        renderFlashcard();
+    }
+    function renderFlashcard() {
+        const card = fcDeck[fcPos];
+        document.getElementById('fc-header').innerText = `Thẻ ${fcPos + 1}/${fcDeck.length} · Đã biết ${fcKnown}/${fcTotal}`;
+        document.getElementById('fc-card').innerHTML = fcFlipped
+            ? `<div style="font-size:22px; font-weight:bold; color:#1f2937;">${card.word} <span style="font-size:14px; color:#6b7280; font-weight:normal;">/ ${card.ipa} /</span></div>
+               <div style="margin-top:6px;">${card.level ? `<span style="background:#e5e7eb; padding:2px 8px; border-radius:4px; font-size:13px; font-weight:bold;">${card.level}</span>` : ''}</div>
+               <div style="font-size:16px; color:#374151; margin-top:12px;">👉 ${card.meaning || '—'}</div>
+               ${card.example ? `<div style="font-size:14px; color:#6b7280; font-style:italic; margin-top:10px;">📝 ${card.example}</div>` : ''}`
+            : `<div style="font-size:34px; font-weight:bold; color:#1f2937;">${card.word}</div>
+               <div style="font-size:13px; color:#9ca3af; margin-top:8px;">👆 Bấm vào thẻ để xem nghĩa</div>`;
+    }
+    function flipFlashcard() { fcFlipped = !fcFlipped; renderFlashcard(); }
+    function flashcardAnswer(know) {
+        if (know) {
+            fcKnown++;
+            fcDeck.splice(fcPos, 1);
+        } else {
+            fcDeck.push(fcDeck[fcPos]);
+            fcDeck.splice(fcPos, 1);
+        }
+        if (fcPos >= fcDeck.length) fcPos = 0;
+        if (fcDeck.length === 0) {
+            document.getElementById('fc-header').innerText = '';
+            document.getElementById('fc-card').innerHTML = `<div style="font-size:22px; font-weight:bold; color:#10b981;">🎉 Hoàn thành!</div>
+                <div style="font-size:15px; color:#374151; margin-top:8px;">Đã ôn ${fcTotal} từ, nhớ ${fcKnown}, cần ôn lại ${fcTotal - fcKnown}.</div>`;
+            document.getElementById('fc-know').style.display = 'none';
+            document.getElementById('fc-unknown').style.display = 'none';
+            return;
+        }
+        fcFlipped = false;
+        renderFlashcard();
+    }
+    function closeFlashcards() {
+        document.getElementById('flashcard-modal').style.display = 'none';
+        document.getElementById('fc-know').style.display = 'inline-block';
+        document.getElementById('fc-unknown').style.display = 'inline-block';
+    }
+
+    // ============================================================
+    // 13. 📊 THỐNG KÊ CẤP ĐỘ (CEFR)
+    // ============================================================
+    async function showStats() {
+        // Mở cửa sổ NGAY + báo đang phân tích, rồi chờ bảng cấp độ CEFR nạp xong (nếu đang nạp)
+        document.getElementById('stats-modal').style.display = 'flex';
+        document.getElementById('stats-body').innerHTML = '<p style="color:#6b7280;">⏳ Đang phân tích cấp độ từ vựng...</p>';
+        if (levelLoadPromise) { try { await levelLoadPromise; } catch (e) {} }
+
+        // 🎯 Đếm theo ĐÚNG BẢNG "Phân tích từ vựng" đang hiển thị (currentVocabData) — thống kê
+        // luôn khớp 100% với số dòng bảng, không còn lệch vì levelMap bị cộng dồn qua nhiều bài
+        // mở cùng phiên hay từ A1/A2 bị nhét thêm. Mỗi dòng bảng = 1 từ gốc (lemma), cấp độ lấy
+        // ngay từ cột "Cấp độ" nên khớp cả khi dữ liệu được sửa bởi /tra-tu.
+        const counts = { B1: 0, B2: 0, C1: 0, C2: 0, Khác: 0 };
+        let total = 0;
+        (currentVocabData || []).forEach(v => {
+            if (!v || !v.word) return;
+            const lvl = String(v.level || '').trim();
+            // 🎯 Bỏ A1/A2 (bảng đã lọc nhưng phòng thủ thêm) — chỉ thống kê dải B1-C2 như mô tả
+            if (/\bA[12]\b/.test(lvl)) return;
+            total++;
+            // Phân nhóm theo cùng thứ tự ưu tiên với màu tô (mauTheoCapDo): B1 → B2 → C1 → C2
+            if (/B1/.test(lvl)) counts['B1']++;
+            else if (/B2/.test(lvl)) counts['B2']++;
+            else if (/C1/.test(lvl)) counts['C1']++;
+            else if (/C2/.test(lvl)) counts['C2']++;
+            else counts['Khác']++;
+        });
+        let html = `<p style="margin:0 0 12px 0; color:#374151;">Tổng từ vựng B1-C2 trong bài (theo bảng phân tích): <b>${total}</b></p>`;
+        [['B1', '#86efac', '#166534'], ['B2', '#93c5fd', '#1e40af'], ['C1', '#fdba74', '#7c2d12'], ['C2', '#fca5a5', '#991b1b'], ['Khác', '#e5e7eb', '#4b5563']].forEach(cfg => {
+            const n = counts[cfg[0]] || 0;
+            const pct = total ? Math.round(n / total * 100) : 0;
+            html += `<div style="display:flex; align-items:center; gap:10px; margin:6px 0;">
+                <span style="width:60px; font-weight:bold; color:${cfg[2]};">${cfg[0]}</span>
+                <div style="flex:1; background:#f3f4f6; border-radius:6px; overflow:hidden;">
+                    <div style="width:${pct}%; background:${cfg[1]}; height:22px; border-radius:6px; display:flex; align-items:center; justify-content:center; min-width:${pct ? '26px' : '0'};">
+                        ${pct ? `<span style="font-size:12px; font-weight:bold; color:#1f2937;">${pct}%</span>` : ''}
+                    </div>
+                </div>
+                <span style="width:60px; text-align:right; color:#6b7280; font-size:13px;">${n} từ</span>
+            </div>`;
+        });
+        document.getElementById('stats-body').innerHTML = html;
+    }
+    function closeStats() { document.getElementById('stats-modal').style.display = 'none'; }
+    
+    checkUser();
+</script>
+</body>
+</html>

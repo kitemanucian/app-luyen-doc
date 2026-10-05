@@ -375,7 +375,21 @@ có commit nào**. Nghĩa là bạn không sửa code 2 tháng → robot âm th�
 Render Free cho app **ngủ sau 15 phút** không có ai truy cập. Lần vào sau phải đợi **~1 phút**.
 Học viên vào buổi sáng sẽ gặp màn hình "đang khởi động".
 
-### Cách chữa: dùng cron-job.org (miễn phí, không cần thẻ)
+### Cách chữa: robot GitHub tự "gõ cửa" web (ĐÃ LÀM SẴN ✅)
+
+Tôi đã tạo sẵn file **`.github/workflows/giu-web-thuc.yml`** — một robot **miễn phí** chạy
+ngay trên GitHub, tự mở web của bạn **mỗi 5 phút**, trong khoảng **06:00 → 23:00 giờ Việt Nam**.
+
+**Việc bạn cần làm: KHÔNG CẦN LÀM GÌ CẢ** 🎉 — chỉ cần file nằm trên GitHub là nó tự chạy.
+
+**Muốn xem nó có chạy không?**
+Mở `https://github.com/TEN-BAN/app-luyen-doc/actions` → thấy workflow **"Giu web Render thuc"**
+→ bấm **Run workflow** → **Run workflow** → đợi ~1 phút → thấy ✅ xanh là tốt.
+
+> 🤖 Robot này chỉ mở **trang chủ** (file tĩnh) nên cực nhẹ, **không tốn tiền Gemini**
+> và không làm chậm web.
+
+**Nếu muốn thêm 1 lớp dự phòng** (tùy chọn, không bắt buộc) thì dùng cron-job.org:
 
 1. Đăng ký: https://cron-job.org/en/signup/ (chỉ cần email)
 2. Vào **Cronjobs** → **Create cronjob**
@@ -385,11 +399,17 @@ Học viên vào buổi sáng sẽ gặp màn hình "đang khởi động".
 |---|---|
 | **Title** | `Giu web thuc` |
 | **URL** | `https://app-luyen-doc.onrender.com/` |
-| **Schedule** | Every **5 minutes** |
+| **Schedule** | chọn **Custom** (tùy chỉnh) — dòng **cuối cùng** trong danh sách |
+| **Cron expression** | `*/5 6-23 * * *` |
 | **Time zone** | `Asia/Ho_Chi_Minh` |
 
-4. Ở phần chọn giờ, chỉ tích **06:00 → 23:00** (xem giải thích bên dưới)
-5. **Save** → bấm **TEST RUN** để chạy thử ngay
+4. **Save** → bấm **TEST RUN** để chạy thử ngay
+
+> ⚠️ **Lưu ý quan trọng:** bản cron-job.org hiện tại **đã bỏ bảng tích chọn giờ** (bản cũ có).
+> Nếu bạn không thấy ô **Custom** / **Cron expression** thì cứ **bỏ qua bước này** —
+> robot GitHub ở trên đã lo được việc giữ web thức rồi.
+>
+> `*/5 6-23 * * *` đọc là: *"cứ 5 phút một lần, chỉ trong khoảng 6 giờ sáng → 11 giờ đêm"*.
 
 ### ⚠️ Bài toán "750 giờ" — PHẢI hiểu để không bị tạm dừng
 
@@ -411,7 +431,8 @@ Chỉ buổi đêm (0h–6h) mới phải chờ ~1 phút — điều này hoàn 
 > 💡 Nếu bạn hay học khuya, có thể đổi thành 05:00–24:00 = 19 giờ/ngày = 589 giờ ✅ vẫn an toàn.
 > **Tuyệt đối đừng** chọn 24/7.
 
-### ✅ Xong VIỆC 6 khi: cron-job.org báo chạy thành công, và web vào là hiện ngay.
+### ✅ Xong VIỆC 6 khi: tab Actions có workflow **"Giu web Render thuc"** chạy xanh,
+và mở web vào buổi sáng thấy hiện **ngay** (không phải chờ).
 
 ---
 
@@ -518,7 +539,7 @@ cd ~/app-luyen-doc && bash oracle/cap-nhat.sh
 | Bấm phân tích từ vựng báo lỗi AI | Key Gemini sai/chưa có | Render → **Environment** → sửa `GEMINI_API_KEY` → Save (tự deploy lại) |
 | Tooltip không hiện, mọi nút lỗi | Backend chưa lên | Xem Logs, kiểm tra status có phải **Live** không |
 | Upload PDF chậm/lỗi | 0.1 CPU + 512 MB | Dùng file nhỏ hơn (<10 trang), hoặc lên Giai đoạn 2 |
-| Web bị treo, báo hết hạn mức | **Hết 750 giờ** | Chờ đầu tháng sau, hoặc chỉnh lại cron-job.org theo đúng VIỆC 6 |
+| Web bị treo, báo hết hạn mức | **Hết 750 giờ** | Chờ đầu tháng sau, rồi xem lại **VIỆC 6** (robot chỉ chạy 06:00–23:00) |
 | Đăng nhập được nhưng không lưu/xoá bài | RLS chưa bật / policy sai | Làm lại **VIỆC 4** |
 | Supabase báo "project paused" | Robot điểm danh chưa chạy | Dashboard bấm **Restore**, rồi kiểm tra tab Actions (**VIỆC 5**) |
 | Đăng ký xong không thấy email xác nhận | Supabase đang gửi mail giới hạn | Supabase → Authentication → Providers → Email → tắt "Confirm email" để test nhanh |
@@ -595,7 +616,8 @@ Render chỉ tính tiền nếu bạn chủ động nâng cấp gói.
 - [ ] Đã **Run workflow** thử → ✅ xanh
 
 **VIỆC 6 — Chống ngủ đông**
-- [ ] Tạo cron-job.org ping mỗi 5 phút, **chỉ 06:00–23:00**
+- [ ] Tab **Actions** có workflow **"Giu web Render thuc"** (robot GitHub, chỉ chạy 06:00–23:00)
+- [ ] (Tùy chọn) Thêm cron-job.org làm lớp dự phòng thứ 2
 - [ ] Vào web buổi sáng thấy hiện **ngay** (không chờ)
 
 **VIỆC 7 — Kiểm tra**

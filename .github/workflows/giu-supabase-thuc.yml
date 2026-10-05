@@ -23,7 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Bắt buộc phải có, để bước 3 commit được
-      - uses: actions/checkout@v4
+      # v7 = bản mới nhất, chạy trên Node 24.
+      # (Bản v4 cũ dùng Node 20 đã bị GitHub khai tử -> gây cảnh báo "deprecated")
+      - uses: actions/checkout@v7
 
       - name: 1) Goi 1 API nhe cua Supabase
         run: |

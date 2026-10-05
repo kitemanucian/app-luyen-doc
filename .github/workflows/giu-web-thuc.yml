@@ -1,0 +1,49 @@
+# ============================================================
+# ⏰ GIỮ WEB RENDER "THỨC" — học viên vào là thấy web NGAY
+#
+# Render gói Free sẽ cho app NGU "ngủ đông" nếu 15 phút không ai truy cập.
+# Lúc đó học viên phải chờ ~1 phút để web tự khởi động lại (rất khó chịu).
+#
+# Workflow này tự "gõ cửa" web mỗi 5 phút trong giờ học
+# (06:00 - 23:00 giờ Việt Nam) để web luôn thức.
+#
+# ⚠️ VÌ SAO CHỈ GIỚI HẠN 17 GIỜ/NGÀY?
+#    Render Free cho 750 giờ máy/tháng.
+#    - Chạy 24/7   : ~744 giờ + giờ build khi deploy => RẤT DỄ VƯỢT 750 => bị tạm dừng
+#    - 17 giờ/ngày : ~527 giờ/tháng => an toàn, còn dư nhiều
+#
+# 💰 GitHub Actions cho repo CÔNG KHAI là MIỄN PHÍ, không cần thẻ.
+# ============================================================
+name: Giu web Render thuc
+
+on:
+  schedule:
+    # GitHub tính giờ UTC. Việt Nam = UTC + 7.
+    # 06:00 – 06:55 giờ VN  =  23:00 – 23:55 UTC (ngày hôm trước)
+    - cron: "*/5 23 * * *"
+    # 07:00 – 22:55 giờ VN  =  00:00 – 15:55 UTC
+    - cron: "*/5 0-15 * * *"
+  workflow_dispatch: # cho phép bạn bấm chạy thử bằng tay trên GitHub
+
+permissions:
+  contents: read
+
+jobs:
+  goi-cua:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1) Goi web cho no thuc
+        run: |
+          # Chỉ mở trang chủ (file tĩnh) nên RẤT nhẹ và KHÔNG tốn tiền Gemini.
+          curl -s -o /dev/null \
+               -w "Ket qua: HTTP %{http_code} | thoi gian phan hoi %{time_total}s\n" \
+               --max-time 90 --retry 2 --retry-delay 10 \
+               https://app-luyen-doc.onrender.com/
+
+      - name: 2) Bao loi ro rang neu web sap
+        if: failure()
+        run: |
+          echo "❌ Khong goi duoc web. Kiem tra:"
+          echo "   1. Mo https://dashboard.render.com xem service con 'Live' khong."
+          echo "   2. Xem tab Logs cua Render de biet loi."
+          exit 1

@@ -976,6 +976,10 @@ URL_GIU_THUC = (
     or os.environ.get("URL_GIU_THUC")           # hoặc bạn tự đặt biến này
     or "https://app-luyen-doc.onrender.com"    # địa chỉ web thật của bạn
 ).strip()
+
+# 🪶 ĐÍCH GÕ CỬA SIÊU NHẸ (chỉ vài chục byte) — dùng cho lớp bảo hiểm chống ngủ VÀ cho cron-job.org.
+# Trước đây cron trỏ vào trang chủ (index.html ~200KB) nên cron-job.org báo "output too large".
+DICH_GIU_THUC = URL_GIU_THUC.rstrip("/") + "/giu-thuc"
 LA_TREN_RENDER = bool(
     os.environ.get("RENDER")
     or os.environ.get("RENDER_EXTERNAL_URL")
@@ -985,6 +989,7 @@ LA_TREN_RENDER = bool(
 TRANG_THAI_GIU_THUC = {
     "dang_bat": False,
     "dia_chi": URL_GIU_THUC,
+    "dia_chi_goi": DICH_GIU_THUC,   # địa chỉ nhịp tim siêu nhẹ đang được gõ mỗi 10 phút
     "so_lan_goi": 0,
     "lan_goi_cuoi": None,
 }
@@ -996,7 +1001,7 @@ def _tu_goi_cua_giu_thuc():
         try:
             gio_vn = (time.gmtime().tm_hour + 7) % 24      # giờ Việt Nam
             if 6 <= gio_vn < 23:
-                requests.get(URL_GIU_THUC, timeout=30)      # gọi trang chủ: nhẹ, KHÔNG tốn Gemini
+                requests.get(DICH_GIU_THUC, timeout=30)     # gõ cửa nhịp tim: vài chục byte, KHÔNG tốn Gemini
                 TRANG_THAI_GIU_THUC["so_lan_goi"] += 1
                 TRANG_THAI_GIU_THUC["lan_goi_cuoi"] = time.strftime(
                     "%H:%M:%S giờ VN", time.gmtime(time.time() + 7 * 3600)
@@ -1012,6 +1017,20 @@ if LA_TREN_RENDER:
     print(f"🔒 Lớp bảo hiểm chống ngủ: BẬT — tự gõ cửa {URL_GIU_THUC} mỗi 10 phút (06h-23h giờ VN)")
 else:
     print("ℹ️  Lớp bảo hiểm chống ngủ: TẮT (chỉ bật khi chạy trên Render).")
+
+
+@app.get("/giu-thuc")
+def giu_thuc():
+    """🪶 NHỊP TIM SIÊU NHẸ — dùng địa chỉ này cho cron-job.org (hoặc bất kỳ dịch vụ ping nào).
+
+    • Chỉ trả về vài chục byte → cron-job.org KHÔNG còn báo "output too large".
+    • Chạm vào là Render thức dậy, nhưng KHÔNG gọi Gemini/Google dịch → KHÔNG tốn tiền.
+    • Địa chỉ đầy đủ: https://app-luyen-doc.onrender.com/giu-thuc
+    """
+    return {
+        "ok": True,
+        "gio_vn": time.strftime("%H:%M:%S giờ VN", time.gmtime(time.time() + 7 * 3600)),
+    }
 
 
 @app.get("/trang-thai-giu-thuc")

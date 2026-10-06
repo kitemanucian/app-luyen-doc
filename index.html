@@ -551,7 +551,9 @@
         currentVocabData.sort((a, b) => (a.level || "").localeCompare(b.level || ""));
         renderVocabTable();
         
-        document.getElementById('level-select').value = 'none'; 
+        // 🎯 MỞ BÀI LÀ TÔ MÀU LUÔN: nhớ lựa chọn lần trước của bạn (lần đầu mặc định = Tô TẤT CẢ B1-C2).
+        // Trước đây mặc định là 'none' (Tắt bôi màu) nên mở bài ra không có màu nào → tưởng hỏng.
+        document.getElementById('level-select').value = (localStorage.getItem('muc_to_mau') || 'ALL');
         applyHighlight();
         syncVocabRows();
         // Nạp cấp độ CEFR cho TOÀN BỘ từ trong bài — bài cũ tô màu chuẩn hơn, tooltip hiện đủ cấp độ
@@ -561,6 +563,7 @@
         const thayDoi = boSungBangTuVung();
         renderVocabTable();
         syncVocabRows();
+        applyHighlight();   // ⬅️ TÔ MÀU LẠI khi đã nạp đủ bảng cấp độ + từ bổ sung (mấu chốt!)
         if (thayDoi) {
             // Lưu ngược để bài cũ TỰ SẠCH VĨNH VIỄN — mở 1 lần là hết rác A1/A2 trong DB
             await supabaseClient.from('articles').update({ vocab_data: currentVocabData }).eq('id', id);
@@ -943,6 +946,99 @@
             tuBoSung.forEach(w => fillMeaning(w));
             dangDongBo = false;
         }
+    }
+
+    // 🎯 Ô CHỌN CẤP ĐỘ GỌI HÀM NÀY — HÀM NÀY BỊ THIẾU TỪ TRƯỚC TỚI NAY.
+    // Vì không tồn tại nên chọn cấp độ trong ô "🎯 Highlight Từ Vựng" KHÔNG có gì xảy ra
+    // → ai cũng tưởng chức năng tô màu hỏng. Nay: tô màu lại + nhớ lựa chọn cho bài sau.
+    function applyHighlightAndPhrase() {
+        const muc = document.getElementById('level-select').value;
+        try { localStorage.setItem('muc_to_mau', muc); } catch (e) {}
+        applyHighlight();
+        toSangCumTuTrongBai(cumTuDangChon);   // giữ nguyên cụm từ đang xem sau khi đổi mức màu
+    }
+
+    // 🗣️ QUÉT CỤM TỪ / THÀNH NGỮ CÓ TRONG BÀI (hàm bị thiếu trước đây → lỗi JS khi mở bài)
+    async function timCumTuCuaBai() {
+        const body = document.getElementById('cum-tu-body');
+        const count = document.getElementById('cum-tu-count');
+        const note = document.getElementById('cum-tu-note');
+        if (!body || !count || !originalContent) return;
+        body.innerHTML = ''; cumTuCuaBai = []; cumTuDangChon = '';
+        if (note) note.style.display = 'none';
+        count.innerText = '⏳ Đang quét cụm từ...';
+        const seq = ++cumTuFetchSeq;   // chuyển bài nhanh thì bỏ kết quả cũ
+        try {
+            const res = await fetchWithTimeout('http://127.0.0.1:8000/tim-cum-tu', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: originalContent })
+            }, 30000);
+            const data = await res.json();
+            if (seq !== cumTuFetchSeq) return;
+            cumTuCuaBai = data.cum_tu || [];
+        } catch (e) { cumTuCuaBai = []; }
+        if (seq !== cumTuFetchSeq) return;
+        if (!cumTuCuaBai.length) {
+            count.innerText = '(bài này không có cụm từ / thành ngữ nào trong kho)';
+            return;
+        }
+        count.innerText = `Tìm thấy ${cumTuCuaBai.length} cụm từ / thành ngữ — bấm tiêu đề để mở`;
+        body.innerHTML = cumTuCuaBai.map((c, i) =>
+            `<span class="cumtu-chip" onclick="chonCumTu(this, ${i})">${c.cum_tu} <small>×${c.so_lan}</small></span>`
+        ).join('');
+        if (note) note.style.display = 'block';
+    }
+
+    // Bấm 1 cụm từ: hiện nghĩa + đọc cả cụm + tô sáng cụm đó trong bài
+    function chonCumTu(el, i) {
+        const c = cumTuCuaBai[i];
+        if (!c) return;
+        cumTuDangChon = c.cum_tu;
+        document.querySelectorAll('#cum-tu-body .cumtu-chip.active').forEach(x => x.classList.remove('active'));
+        if (el) el.classList.add('active');
+        let hop = document.getElementById('cum-tu-chi-tiet');
+        if (!hop) {
+            hop = document.createElement('div');
+            hop.id = 'cum-tu-chi-tiet';
+            hop.style.cssText = 'margin-top:8px; background:#faf5ff; border:1px solid #e9d5ff; border-radius:8px; padding:8px 10px; font-size:13px; color:#3b0764; line-height:1.7;';
+            document.getElementById('cum-tu-panel').appendChild(hop);
+        }
+        const anToan = String(c.cum_tu).replace(/'/g, "\\'");
+        hop.innerHTML = `<b>${c.cum_tu}</b> <i>(${c.loai || 'cụm từ'} — xuất hiện ${c.so_lan} lần)</i><br>${c.nghia || 'Chưa có nghĩa trong kho.'} ` +
+            `<button onclick="speakTTS('${anToan}')" style="background:#3b82f6;width:auto;margin:6px 0 0;padding:4px 12px;">🔊 Nghe</button>`;
+        toSangCumTuTrongBai(c.cum_tu);
+    }
+
+    // Tô sáng cụm từ trong bài bằng <mark class="cumtu-mark"> (dùng CSS có sẵn, KHÔNG phá màu cấp độ)
+    function toSangCumTuTrongBai(cumTu) {
+        document.querySelectorAll('#display-content mark.cumtu-mark').forEach(m => {
+            const p = m.parentNode;
+            while (m.firstChild) p.insertBefore(m.firstChild, m);
+            p.removeChild(m);
+        });
+        const tu = String(cumTu || '').toLowerCase().split(/\s+/).filter(Boolean);
+        if (!tu.length) return;
+        const spans = Array.from(document.querySelectorAll('#display-content .word-span'));
+        const tuCuaSpan = spans.map(s => (s.getAttribute('data-word') || '').toLowerCase());
+        const daDung = new Set();
+        let dau = null;
+        for (let i = 0; i + tu.length <= tuCuaSpan.length; i++) {
+            if (tu.some((_, j) => daDung.has(i + j))) continue;          // không chồng lên cụm đã nhận
+            if (!tu.every((t, j) => tuCuaSpan[i + j] === t)) continue;
+            const mark = document.createElement('mark');
+            mark.className = 'cumtu-mark';
+            spans[i].parentNode.insertBefore(mark, spans[i]);
+            for (let j = 0; j < tu.length; j++) { mark.appendChild(spans[i + j]); daDung.add(i + j); }
+            if (!dau) dau = mark;
+        }
+        if (dau && dau.scrollIntoView) dau.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    // Mở/đóng bảng cụm từ (hàm bị thiếu trước đây → bấm tiêu đề không có gì xảy ra)
+    function toggleCumTuPanel() {
+        const body = document.getElementById('cum-tu-body');
+        if (!body) return;
+        body.style.display = (body.style.display === 'block') ? 'none' : 'block';
     }
 
    // 9. CẢM BIẾN CHUỘT THÔNG MINH (CHIA LUẬT HOVER VÀ CLICK)

@@ -3,7 +3,7 @@ import os
 import re
 import threading
 import time
-from collections import Counter
+from collections import Counter, deque
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
@@ -21,8 +21,9 @@ import pymupdf  # Thư viện đọc PDF (PyMuPDF) — dùng tên mới để h�
 import pytesseract
 import requests  # Gọi Gemini AI từ backend
 import spacy
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 app = FastAPI()
@@ -980,6 +981,48 @@ URL_GIU_THUC = (
 # 🪶 ĐÍCH GÕ CỬA SIÊU NHẸ (chỉ vài chục byte) — dùng cho lớp bảo hiểm chống ngủ VÀ cho cron-job.org.
 # Trước đây cron trỏ vào trang chủ (index.html ~200KB) nên cron-job.org báo "output too large".
 DICH_GIU_THUC = URL_GIU_THUC.rstrip("/") + "/giu-thuc"
+
+# ============================================================
+# 🪶 NHỊP TIM CHO DỊCH VỤ GIÁM SÁT + NHẬT KÝ GỌI CỬA (tự chẩn đoán cron-job.org)
+#
+# Vì sao cần: nhiều dịch vụ giám sát (cron-job.org, UptimeRobot...) gọi thẳng TRANG CHỦ
+# '/' (≈109 KB) → bị báo "output too large". Gặp đúng chúng (hoặc lệnh HEAD) thì app trả
+# về {"ok":true} = 12 byte. NGƯỜI DÙNG THẬT MỞ WEB KHÔNG BỊ ẢNH HƯỞNG GÌ.
+#
+# Nhật ký giúp trả lời câu hỏi "cron-job.org thực sự gọi địa chỉ nào?":
+#   mở https://app-luyen-doc.onrender.com/nhat-ky-giu-thuc
+# ============================================================
+DANH_SACH_GIAM_SAT = (
+    "cron-job", "uptimerobot", "pingdom", "betteruptime", "betterstack", "freshping",
+    "statuscake", "site24x7", "hetrix", "checkly", "montastic", "updown", "healthchecks",
+    "cronitor", "nagios", "zabbix", "datadog", "newrelic", "sematext", "statuspage",
+)
+NHAT_KY_GIU_THUC = deque(maxlen=40)     # 40 lượt "gọi cửa" gần nhất
+
+
+def _ghi_nhat_ky(duong_dan, phuong_thuc, ua, ket_qua):
+    NHAT_KY_GIU_THUC.append({
+        "gio_vn": time.strftime("%H:%M:%S", time.gmtime(time.time() + 7 * 3600)),
+        "duong_dan": duong_dan,
+        "phuong_thuc": phuong_thuc,
+        "trinh_duyet": (ua or "?")[:70],
+        "tra_ve": ket_qua,
+    })
+
+
+@app.middleware("http")
+async def nhip_tim_cho_giam_sat(request: Request, call_next):
+    """Trả nhịp tim 12 byte cho dịch vụ giám sát/Lệnh HEAD; mọi truy cập khác giữ nguyên.
+    Đồng thời ghi lại mọi lượt gọi cửa để bạn tự kiểm tra."""
+    ua = (request.headers.get("user-agent") or "").lower()
+    duong_dan = request.url.path or "/"
+    la_giam_sat = any(k in ua for k in DANH_SACH_GIAM_SAT)
+    if duong_dan in ("/", "/index.html") and (request.method == "HEAD" or la_giam_sat):
+        _ghi_nhat_ky(duong_dan, request.method, ua, "nhịp tim 12 byte")
+        return JSONResponse({"ok": True})
+    dap_ung = await call_next(request)
+    _ghi_nhat_ky(duong_dan, request.method, ua, f"{dap_ung.headers.get('content-length', '?')} byte")
+    return dap_ung
 LA_TREN_RENDER = bool(
     os.environ.get("RENDER")
     or os.environ.get("RENDER_EXTERNAL_URL")
@@ -1030,6 +1073,19 @@ def giu_thuc():
     return {
         "ok": True,
         "gio_vn": time.strftime("%H:%M:%S giờ VN", time.gmtime(time.time() + 7 * 3600)),
+    }
+
+
+@app.get("/nhat-ky-giu-thuc")
+def nhat_ky_giu_thuc():
+    """🔍 Xem 40 lượt "gọi cửa" gần nhất: ai gọi, vào địa chỉ nào, trả về bao nhiêu byte.
+
+    Dùng để kiểm tra cron-job.org THỰC SỰ đang gọi địa chỉ nào: tìm dòng có trinh_duyet
+    chứa "cron-job" → xem duong_dan và tra_ve của nó.
+    """
+    return {
+        "huong_dan": "Dong nao co trinh_duyet chua 'cron-job' la luot goi cua cron-job.org — xem duong_dan va tra_ve",
+        "gan_nhat": list(reversed(NHAT_KY_GIU_THUC)),
     }
 
 

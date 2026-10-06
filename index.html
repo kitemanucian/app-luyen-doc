@@ -694,10 +694,23 @@
         // bấm muộn (sau khi applyHighlight bổ sung từ) lại thấy 5 từ C2. Con số giờ ổn định tuyệt đối.
         const task = (async () => {
             try {
-                let res = await fetchWithTimeout('http://127.0.0.1:8000/lay-cap-do', {
+                // ⏱️ CHỜ TỚI 90 GIÂY (trước đây chỉ 7 giây):
+                //  • Bài dài ~300 từ backend cần vài giây xử lý;
+                //  • Lần đầu trong ngày web Render còn "ngủ" → phải chờ khởi động (~45 giây).
+                // Chỉ chờ 7 giây nên bị NGẮT giữa chừng → bảng cấp độ trống → KHÔNG TÔ MÀU.
+                const goiCapDo = () => fetchWithTimeout('http://127.0.0.1:8000/lay-cap-do', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ words: cleanWords })
-                });
-                if (!res.ok) return;
+                }, 90000);
+                // Tự THỬ LẠI 1 LẦN (chờ 3 giây) nếu mạng đứt hoặc server vừa thức dậy trả lỗi
+                let res = null;
+                for (let lan = 1; lan <= 2; lan++) {
+                    try {
+                        res = await goiCapDo();
+                        if (res.ok) break;
+                    } catch (e) { res = null; }
+                    if (lan === 1) await new Promise(r => setTimeout(r, 3000));
+                }
+                if (!res || !res.ok) return;
                 let data = await res.json();
                 Object.assign(levelMap, data.levels || {});
                 Object.assign(lemmaMap, data.lemmas || {});   // surface -> gốc từ chuẩn để khớp biến thể phi hình thái

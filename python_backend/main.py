@@ -3,6 +3,7 @@ import os
 import re
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 
 # 🌱 Nạp biến môi trường từ file .env (nếu có). Hoàn toàn tùy chọn —
 # thiếu thư viện python-dotenv thì bỏ qua và chạy y như cũ.
@@ -127,6 +128,9 @@ else:
     print(f"⚠️ Không tìm thấy file {duong_csv} — chữ 'Cơ bản' sẽ còn xuất hiện.")
 
 
+@lru_cache(maxsize=50000)   # 🚀 nhớ kết quả theo từng từ — bài sau mở lại gần như TỨC THÌ
+# ⚠️ Từ điển tĩnh (CSV + full-word.json) nạp 1 lần vào RAM lúc khởi động nên kết quả
+#    của hàm này KHÔNG BAO GIỜ đổi trong 1 phiên chạy → cache an toàn tuyệt đối.
 def cap_do_cuoi_cung(tu: str) -> str:
     """Cấp độ CEFR: ưu tiên bảng CSV (9.936 từ, phủ cả A1/A2, chính xác hơn);
     từ nào CSV không có thì dùng level trong full-word.json."""
@@ -167,11 +171,16 @@ POS_SPACY_TV = {
 }
 
 
-def pos_tieng_viet(tu: str, type_tu_dien: str = "") -> str:
+def pos_tieng_viet(tu: str, type_tu_dien: str = "", nhan_spacy: str = "") -> str:
     """Từ loại tiếng Việt: ưu tiên 'type' có sẵn trong full-word.json (noun, verb...);
-    từ không có trong từ điển thì suy ra bằng spaCy (NOUN, VERB...). Không bao giờ lỗi."""
+    từ không có trong từ điển thì suy ra bằng spaCy (NOUN, VERB...). Không bao giờ lỗi.
+
+    🚀 nhan_spacy: nhãn từ loại (NOUN/VERB...) ĐÃ CÓ SẴN từ lần gọi spaCy duy nhất của cả
+    bài (lemmatize_va_pos) — dùng luôn, KHÔNG gọi nlp() lại từng từ nữa (nhanh gấp ~100 lần)."""
     if type_tu_dien:
         return POS_TV.get(type_tu_dien.lower(), type_tu_dien)
+    if nhan_spacy:
+        return POS_SPACY_TV.get(nhan_spacy, nhan_spacy)
     if not tu:
         return ""
     doc = nlp(tu)
@@ -246,6 +255,54 @@ def lemmatize_danh_sach(cac_tu: list[str]) -> list[str]:
                     break
         cac_goc.append(goc)
     return cac_goc
+
+
+# Các gốc ĐÚNG LÀ trợ động từ thật — chỉ những từ này mới hiện "trợ động từ" trong tooltip.
+TRO_DONG_TU_GOC = {
+    "be", "am", "is", "are", "was", "were", "been", "being",
+    "have", "has", "had", "do", "does", "did",
+    "will", "would", "shall", "should", "can", "could", "may", "might", "must",
+}
+
+
+def lemmatize_va_pos(cac_tu: list[str]):
+    """Gốt gốc từ + LẤY LUÔN nhãn từ loại bằng ĐÚNG 1 LẦN gọi spaCy cho cả danh sách.
+
+    Trả về (danh sách gốc từ, {gốc từ: nhãn spaCy như 'NOUN'/'VERB'}).
+
+    🐞 VÌ SAO CẦN HÀM NÀY: trước đây /lay-cap-do gọi pos_tieng_viet() cho TỪNG từ, mà
+    từ nào không có trong full-word.json lại chạy nlp(từ) riêng → bài 300 từ = 300 lần
+    spaCy ≈ 10 GIÂY > 7 giây trình duyệt chờ → bị ngắt → BẢNG CẤP ĐỘ TRỐNG → không tô màu.
+    Nay chỉ 1 lần spaCy cho cả bài, phần còn lại là tra từ điển trong RAM.
+    """
+    if not cac_tu:
+        return [], {}
+    doc = nlp(" ".join(cac_tu))
+    bat_dau = []
+    vi_tri = 0
+    for w in cac_tu:
+        bat_dau.append(vi_tri)
+        vi_tri += len(w) + 1
+    cac_goc = []
+    nhan_pos = {}
+    for i, w in enumerate(cac_tu):
+        ket = bat_dau[i] + len(w)
+        goc = w
+        for t in doc:
+            if bat_dau[i] <= t.idx < ket:
+                if not t.is_punct and not t.is_space:
+                    goc = t.lemma_.lower()
+                    nhan = t.pos_
+                    # ⚠️ spaCy gắn nhãn AUX cho CẢ động từ chính ở dạng quá khứ phân từ /
+                    # gerund (leavened, building...) khi nằm trong câu bị động.
+                    # → Chỉ những gốc ĐÚNG LÀ trợ động từ thật (be/have/do/will/can/must...)
+                    #   mới giữ "trợ động từ"; còn lại trả về "động từ" cho đúng.
+                    if nhan == "AUX" and goc not in TRO_DONG_TU_GOC:
+                        nhan = "VERB"
+                    nhan_pos[goc] = nhan
+                    break
+        cac_goc.append(goc)
+    return cac_goc, nhan_pos
 
 # 3.6 BỘ NHỚ ĐỆM + DỊCH GOOGLE DÙNG CHUNG (GIẢM TẢI MẠNG CỰC MẠNH)
 PHIEN_DICH = requests.Session()  # phiên kết nối dùng chung (keep-alive -> dịch nhanh hơn nhiều)
@@ -498,7 +555,7 @@ def lay_cap_do(req: CapDoRequest):
     # Lemmatize theo TỪNG từ (khớp theo khoảng ký tự) — từ có nháy đơn/gạch nối vd "it's",
     # "world's", "built-in" bị spaCy tách thành nhiều token nhưng KHÔNG còn làm lệch mọi từ
     # phía sau (bug khiến temperature nhận lemma "habitation" → tô C2 sai + nghĩa sai).
-    tu_goc_list = lemmatize_danh_sach(cac_tu)
+    tu_goc_list, nhan_pos = lemmatize_va_pos(cac_tu)   # 1 lần spaCy cho cả bài (nhanh gấp ~100 lần)
     levels = {}
     lemmas = {}   # bản đồ dạng-trong-bài -> gốc từ chuẩn (vd "leavened" -> "leaven", "wealthier" -> "wealthy")
     # để front-end khớp BIẾN THỂ PHI HÌNH THÁI với từ trong bảng phân tích (không phụ thuộc CSV
@@ -509,7 +566,7 @@ def lay_cap_do(req: CapDoRequest):
         levels[w] = CAP_DO_CSV.get(tu_goc) or (TU_DIEN.get(tu_goc, {}).get("level") or "")
         if tu_goc and tu_goc != w:
             lemmas[w] = tu_goc
-        pos[w] = pos_tieng_viet(tu_goc, TU_DIEN.get(tu_goc, {}).get("type", ""))
+        pos[w] = pos_tieng_viet(tu_goc, TU_DIEN.get(tu_goc, {}).get("type", ""), nhan_pos.get(tu_goc, ""))
     return {"levels": levels, "lemmas": lemmas, "pos": pos}
 
 # 6.4 TRẠM VÁ DỮ LIỆU BÀI CŨ (TRA ĐỒNG LOẠT CHO CẢ BÀI ĐỌC)
@@ -533,7 +590,7 @@ def tu_dien_ho_tro(req: TuDienHoTroRequest):
     # Lemmatize theo TỪNG từ (khớp theo khoảng ký tự) — từ có nháy đơn/gạch nối vd "it's",
     # "world's", "built-in" bị spaCy tách thành nhiều token nhưng KHÔNG còn làm lệch mọi từ
     # phía sau (bug khiến temperature nhận nghĩa/cấp độ của habitation, difference của cosmic).
-    tu_goc_list = lemmatize_danh_sach(cac_tu)
+    tu_goc_list, nhan_pos = lemmatize_va_pos(cac_tu)   # 1 lần spaCy cho cả bài
 
     ket_qua = {}
     can_dich = set()
@@ -553,14 +610,14 @@ def tu_dien_ho_tro(req: TuDienHoTroRequest):
                 "level": level,
                 "example": du_lieu_tu.get("example", ""),
                 "audio": du_lieu_tu.get("audio", ""),
-                "pos": pos_tieng_viet(tu_goc, du_lieu_tu.get("type", "")),
+                "pos": pos_tieng_viet(tu_goc, du_lieu_tu.get("type", ""), nhan_pos.get(tu_goc, "")),
             }
         else:
             can_dich.add(tu_goc)
             ket_qua[tu] = {
                 "word": tu_goc, "meaning": "", "ipa": "",
                 "level": level, "example": "", "audio": "",
-                "pos": pos_tieng_viet(tu_goc),
+                "pos": pos_tieng_viet(tu_goc, nhan_spacy=nhan_pos.get(tu_goc, "")),
             }
 
     # Dịch GỘP MẺ toàn bộ nghĩa còn thiếu — nhanh hơn hẳn dịch từng từ

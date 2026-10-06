@@ -1,6 +1,8 @@
 import json
 import os
 import re
+import threading
+import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
@@ -955,6 +957,67 @@ def doc_tai_lieu(file: UploadFile = File(...)):
 from cn_module import router as cn_router
 
 app.include_router(cn_router, prefix="/cn")
+
+
+# ============================================================
+# 🔒 LỚP BẢO HIỂM: TỰ "GÕ CỬA" CHÍNH MÌNH ĐỂ WEB KHÔNG NGỦ
+# ============================================================
+# Vì sao cần: Render Free cho app "ngủ đông" sau 15 phút không ai truy cập,
+# học viên vào phải chờ ~45 giây. Mỗi lần web tự gọi chính nó thì Render coi như
+# "có người truy cập" → app THỨC LIÊN TỤC trong giờ học.
+#
+# Qua 23h thì NGHỈ GỌI → app được ngủ để tiết kiệm 750 giờ máy/tháng của Render
+# Free (chạy 6h-23h ≈ 527 giờ/tháng → an toàn; chạy 24/7 ≈ 744 giờ → dễ vượt hạn).
+#
+# Chạy ở máy bạn: lớp này TẮT (không gọi đi đâu cả) → hành vi cũ giữ nguyên 100%.
+# ============================================================
+URL_GIU_THUC = (
+    os.environ.get("RENDER_EXTERNAL_URL")       # Render tự cấp biến này khi deploy
+    or os.environ.get("URL_GIU_THUC")           # hoặc bạn tự đặt biến này
+    or "https://app-luyen-doc.onrender.com"    # địa chỉ web thật của bạn
+).strip()
+LA_TREN_RENDER = bool(
+    os.environ.get("RENDER")
+    or os.environ.get("RENDER_EXTERNAL_URL")
+    or os.environ.get("URL_GIU_THUC")
+)
+
+TRANG_THAI_GIU_THUC = {
+    "dang_bat": False,
+    "dia_chi": URL_GIU_THUC,
+    "so_lan_goi": 0,
+    "lan_goi_cuoi": None,
+}
+
+
+def _tu_goi_cua_giu_thuc():
+    """Vòng lặp nền: gõ cửa chính web 10 phút/lần trong khoảng 06h-23h giờ VN."""
+    while True:
+        try:
+            gio_vn = (time.gmtime().tm_hour + 7) % 24      # giờ Việt Nam
+            if 6 <= gio_vn < 23:
+                requests.get(URL_GIU_THUC, timeout=30)      # gọi trang chủ: nhẹ, KHÔNG tốn Gemini
+                TRANG_THAI_GIU_THUC["so_lan_goi"] += 1
+                TRANG_THAI_GIU_THUC["lan_goi_cuoi"] = time.strftime(
+                    "%H:%M:%S giờ VN", time.gmtime(time.time() + 7 * 3600)
+                )
+        except Exception:
+            pass        # mạng trục trặc thì 10 phút sau thử lại (KHÔNG được làm sập app)
+        time.sleep(600)  # 10 phút
+
+
+if LA_TREN_RENDER:
+    TRANG_THAI_GIU_THUC["dang_bat"] = True
+    threading.Thread(target=_tu_goi_cua_giu_thuc, daemon=True).start()
+    print(f"🔒 Lớp bảo hiểm chống ngủ: BẬT — tự gõ cửa {URL_GIU_THUC} mỗi 10 phút (06h-23h giờ VN)")
+else:
+    print("ℹ️  Lớp bảo hiểm chống ngủ: TẮT (chỉ bật khi chạy trên Render).")
+
+
+@app.get("/trang-thai-giu-thuc")
+def trang_thai_giu_thuc():
+    """Mở địa chỉ này trên trình duyệt để xem lớp bảo hiểm có đang chạy hay không."""
+    return TRANG_THAI_GIU_THUC
 
 
 # ============================================================

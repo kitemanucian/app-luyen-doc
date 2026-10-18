@@ -21,7 +21,7 @@ import pymupdf  # Thư viện đọc PDF (PyMuPDF) — dùng tên mới để h�
 import pytesseract
 import requests  # Gọi Gemini AI từ backend
 import spacy
-from fastapi import FastAPI, File, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -44,7 +44,10 @@ app.add_middleware(
 
 # 2. KHỞI ĐỘNG NÃO BỘ NLP (spaCy)
 print("⏳ Đang tải mô hình Ngôn ngữ học spaCy...")
-nlp = spacy.load("en_core_web_sm")
+# ⚠️ CHỈ nạp tagger + attribute_ruler + lemmatizer (bỏ "parser" và "ner").
+# Web này không dùng cây phụ thuộc / thực thể, mà 2 tầng đó ngốn phần lớn RAM
+# → bài dài hàng chục nghìn từ là nổ hạn mức 512MB của Render.
+nlp = spacy.load("en_core_web_sm", exclude=["parser", "ner"])
 print("✅ Đã tải xong spaCy!")
 
 # 3. NẠP TỪ ĐIỂN VÀO RAM (Bao gồm cả Cấp độ, Phiên âm và Nghĩa)
@@ -413,16 +416,68 @@ class ArticleRequest(BaseModel):
     text: str
 
 # 5. TRẠM PHÂN TÍCH VÀ DỊCH THUẬT SIÊU TỐC
+# ══════════════════════════════════════════════════════════════════════════════
+# CHỐNG NỔ RAM KHI BÀI QUÁ DÀI
+# Bài 100.000 từ (≈1 cuốn sách) mà đưa vào nlp(ca_bai) MỘT LẦN thì spaCy dựng cấu
+# trúc cho TOÀN VĂN → vượt 512MB của Render → service bị kill (502 Bad Gateway +
+# email "exceeded its memory limit"), kéo theo cron giám sát cũng báo lỗi.
+# Cách chữa: cắt thành từng mẻ ~3.000 từ, xử lý lần lượt → RAM phẳng, không phụ
+# thuộc độ dài bài.
+# ══════════════════════════════════════════════════════════════════════════════
+MAN_TOI_DA = 1500            # số từ mỗi mẻ đưa vào spaCy (đo thực tế: bài 216k từ chỉ ~188MB RAM)
+BATCH_SPACY = 2              # số mẻ xử lý song song — nhỏ để RAM phẳng
+KY_TU_TOI_DA = 1_500_000     # ≈150.000 từ — vượt mức này trả lỗi rõ ràng thay vì treo/OOM
+
+
+def chia_van_ban(van_ban: str, moi_man: int = MAN_TOI_DA):
+    """Cắt văn bản thành từng mẻ nhỏ, ưu tiên ranh giới câu/đoạn để không cắt vụn ngữ cảnh."""
+    man, dem = [], 0
+    for cau in re.split(r"(?<=[.!?])\s+|\n+", van_ban or ""):
+        if not cau or not cau.strip():
+            continue
+        so_tu = len(cau.split())
+        if so_tu > moi_man:                      # 1 câu/đoạn khổng lồ (sách không xuống dòng)
+            if man:
+                yield " ".join(man)
+                man, dem = [], 0
+            tu = cau.split()
+            for i in range(0, len(tu), moi_man):
+                yield " ".join(tu[i:i + moi_man])
+            continue
+        man.append(cau)
+        dem += so_tu
+        if dem >= moi_man:
+            yield " ".join(man)
+            man, dem = [], 0
+    if man:
+        yield " ".join(man)
+
+
+def cac_token(van_ban: str):
+    """Duyệt token theo từng mẻ — bộ nhớ KHÔNG phình theo độ dài bài."""
+    for man in nlp.pipe(chia_van_ban(van_ban), batch_size=BATCH_SPACY):
+        for token in man:
+            yield token
+
+
 @app.post("/phan-tich-bai-doc")
 def phan_tich(req: ArticleRequest):
-    # Đưa văn bản qua bộ não spaCy để phân tách
-    doc = nlp(req.text)
+    # Chặn đầu vào phi lý để không bao giờ chạm trần RAM lần nữa
+    van_ban = req.text or ""
+    if len(van_ban) > KY_TU_TOI_DA:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Bài quá dài ({len(van_ban.split()):,} từ). Hãy chia thành các bài nhỏ hơn "
+                f"(dưới ~150.000 từ) rồi nạp lại — máy chủ sẽ phân tích nhanh và không bị quá tải."
+            ),
+        )
     
     ket_qua = []
     tu_da_loc = set()
     cac_tu_can_dich = set()  # gom các từ cần Google dịch để dịch SONG SONG 1 lượt cho nhanh
 
-    for token in doc:
+    for token in cac_token(van_ban):
         # BỘ LỌC THÉP: Loại bỏ dấu câu, khoảng trắng, số, và TỪ CƠ BẢN (Stop words như by, in, the...)
         if token.is_punct or token.is_space or token.is_digit or token.is_stop:
             continue
@@ -471,11 +526,22 @@ def phan_tich(req: ArticleRequest):
                     "pos": pos_tieng_viet(tu_goc)  # Từ loại suy bằng spaCy
                 })
             
-    # Dịch SONG SONG toàn bộ từ cần dịch (nhanh hơn hẳn dịch tuần tự)
-    ban_dich = dich_google_hang_loat(cac_tu_can_dich)
+    # Dịch SONG SONG — CHỈ tối đa 300 từ mỗi lượt. Dịch cả nghìn từ trong 1 request là
+    # nguyên nhân request vượt thời gian chờ → frontend bỏ dở → từ kẹt "Đang tra nghĩa".
+    # Số còn lại để trống, frontend nạp lười qua /nghia/{word} (có cache).
+    if len(cac_tu_can_dich) > 300:
+        print(f"ℹ️  Bài lớn: {len(cac_tu_can_dich)} từ cần dịch → dịch trước 300 từ.")
+    ban_dich = dich_google_hang_loat(list(cac_tu_can_dich)[:300])
     for r in ket_qua:
         if r["meaning"] == "@@CANDICH@@":
             r["meaning"] = ban_dich.get(r["word"]) or "Không thể dịch tự động."
+
+    # Bảng từ vựng của bài quá dài sẽ phình rất to (tải chậm + phình dữ liệu Supabase).
+    # Giữ tối đa 2.500 mục, ưu tiên mục ĐÃ CÓ NGHĨA. Việc TÔ MÀU không phụ thuộc bảng này
+    # (tô màu lấy từ /lay-cap-do theo toàn văn) nên tính năng đọc không bị ảnh hưởng.
+    if len(ket_qua) > 2500:
+        co_nghia = [r for r in ket_qua if r.get("meaning")]
+        ket_qua = co_nghia[:2500]
 
     # Gửi trả về cho Web JavaScript
     return {"tu_vung_quan_trong": ket_qua}
@@ -587,6 +653,8 @@ def tu_dien_ho_tro(req: TuDienHoTroRequest):
         w = (w or "").strip().lower()
         if w and w not in cac_tu:
             cac_tu.append(w)
+    # Mỗi lượt tối đa 400 từ (frontend gửi theo mẻ 60) — tránh request khổng lồ bị timeout
+    cac_tu = cac_tu[:400]
     if not cac_tu:
         return {"results": {}}
 
@@ -623,8 +691,9 @@ def tu_dien_ho_tro(req: TuDienHoTroRequest):
                 "pos": pos_tieng_viet(tu_goc, nhan_spacy=nhan_pos.get(tu_goc, "")),
             }
 
-    # Dịch GỘP MẺ toàn bộ nghĩa còn thiếu — nhanh hơn hẳn dịch từng từ
-    ban_dich = dich_google_hang_loat(can_dich)
+    # Dịch GỘP MẺ nghĩa còn thiếu — tối đa 250 từ/lượt; từ nào chưa kịp thì để trống,
+    # lượt sau (hoặc /nghia) sẽ vá tiếp. Không bao giờ để 1 request phải dịch cả nghìn từ.
+    ban_dich = dich_google_hang_loat(sorted(can_dich)[:250])
     for tu, kq in ket_qua.items():
         if not kq["meaning"]:
             kq["meaning"] = ban_dich.get(kq["word"]) or ban_dich.get(tu) or ""
@@ -1017,7 +1086,15 @@ async def nhip_tim_cho_giam_sat(request: Request, call_next):
     ua = (request.headers.get("user-agent") or "").lower()
     duong_dan = request.url.path or "/"
     la_giam_sat = any(k in ua for k in DANH_SACH_GIAM_SAT)
-    if duong_dan in ("/", "/index.html") and (request.method == "HEAD" or la_giam_sat):
+    # Trình duyệt thật luôn khai báo AppleWebKit/Chrome/Safari/Firefox. Cron-job.org khai
+    # "mozilla/4.0 (compatible; cron-job.org…)" — trước đây bị coi là trình duyệt nên nhận
+    # nguyên trang 109KB → cron-job.org báo "Response data too big" rồi TỰ TẮT job.
+    la_trinh_duyet = ("mozilla" in ua) and any(
+        k in ua for k in ("applewebkit", "chrome", "safari", "firefox", "edg/", "opr/")
+    )
+    if duong_dan in ("/", "/index.html") and (
+        request.method == "HEAD" or la_giam_sat or not la_trinh_duyet
+    ):
         _ghi_nhat_ky(duong_dan, request.method, ua, "nhịp tim 12 byte")
         return JSONResponse({"ok": True})
     dap_ung = await call_next(request)

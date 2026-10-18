@@ -165,6 +165,17 @@
                     <button id="btn-read-all" onclick="toggleReadAll()" style="background:#3b82f6; width:auto; margin:0; padding:8px 15px;">🔊 Đọc cả bài</button>
                     <button onclick="showStats()" style="background:#8b5cf6; width:auto; margin:0; padding:8px 15px;">📊 Thống kê</button>
                     <button onclick="startFlashcardsFromArticle()" style="background:#eab308; width:auto; margin:0; padding:8px 15px;">🃏 Flashcards</button>
+                    <button onclick="moTraTu()" style="background:#0f766e; width:auto; margin:0; padding:8px 15px;">🔍 Tra từ</button>
+                </div>
+
+                <!-- 🔍 KHUNG TRA TỪ NHANH — dùng khi 1 từ trong bài chưa có nghĩa (A1/A2 chưa có trong từ điển) -->
+                <div id="tra-tu-panel" style="display:none; background:#f0fdfa; border:1px solid #99f6e4; padding:12px; border-radius:6px; margin-bottom:16px;">
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <input id="tra-tu-input" type="text" placeholder="Gõ 1 từ/cụm từ tiếng Anh… (vd: leverage)" style="margin:0;" onkeydown="if(event.key==='Enter') traTuNhanh()">
+                        <button onclick="traTuNhanh()" style="background:#0f766e; width:auto; margin:0; padding:8px 18px;">Tra</button>
+                        <button onclick="dongTraTu()" style="background:#64748b; width:auto; margin:0; padding:8px 14px;">Đóng</button>
+                    </div>
+                    <div id="tra-tu-ket-qua" style="margin-top:10px; font-size:15px; line-height:1.6;"></div>
                 </div>
 
                 <!-- 🗣️ CỤM TỪ / THÀNH NGỮ TRONG BÀI — bảng con tra cứu nhanh từ file cum_tu_tieng_anh.json -->
@@ -773,6 +784,80 @@
         } catch (e) {}
     }
 
+    // ================================================================
+    // 🔍 KHUNG TRA TỪ NHANH (giải pháp cho lỗi "từ không hiện nghĩa")
+    // Gõ 1 từ/cụm → /tra-tu (RAM: IPA, cấp độ, ví dụ) → /nghia (dịch khi RAM thiếu)
+    // → 1 nút lưu thẳng vào Sổ tay của bài đang mở.
+    // ================================================================
+    let _ketQuaTraTu = null;
+
+    function moTraTu() {
+        let p = document.getElementById('tra-tu-panel');
+        let dangMo = p.style.display === 'block';
+        p.style.display = dangMo ? 'none' : 'block';
+        if (!dangMo) document.getElementById('tra-tu-input').focus();
+    }
+
+    function dongTraTu() { document.getElementById('tra-tu-panel').style.display = 'none'; }
+
+    async function traTuNhanh() {
+        let tu = (document.getElementById('tra-tu-input').value || '').trim();
+        let o = document.getElementById('tra-tu-ket-qua');
+        if (!tu) { o.innerHTML = ''; return; }
+        o.innerHTML = '<span style="color:#64748b;">⏳ Đang tra…</span>';
+        _ketQuaTraTu = null;
+        try {
+            let d = {};
+            try {
+                let res = await fetchWithTimeout(`http://127.0.0.1:8000/tra-tu/${encodeURIComponent(tu)}`, {}, 15000);
+                if (res.ok) d = await res.json();
+            } catch (e) { /* /tra-tu lỗi → vẫn thử /nghia bên dưới */ }
+
+            let tuGoc = (d.word || tu).trim();
+            let nghia = (d.meaning || '').trim();
+            if (!nghia) {
+                try {
+                    let r2 = await fetchWithTimeout(`http://127.0.0.1:8000/nghia/${encodeURIComponent(tuGoc)}`, {}, 30000);
+                    if (r2.ok) nghia = ((await r2.json()).meaning || '').trim();
+                } catch (e) {}
+            }
+
+            let ipa = d.ipa ? `<span style="color:#6b7280;">/${d.ipa}/</span>` : '';
+            let badge = d.level ? `<span style="background:#e5e7eb; border-radius:4px; padding:1px 6px; font-size:12px;">${d.level}</span>` : '';
+            let pos = d.pos ? `<span style="color:#6b7280; font-size:13px;">· ${d.pos}</span>` : '';
+            _ketQuaTraTu = { word: tuGoc, meaning: nghia, ipa: d.ipa || '', level: d.level || '', example: d.example || '', pos: d.pos || '' };
+
+            o.innerHTML =
+                `<div><b style="font-size:17px; color:#0f172a;">${tuGoc}</b> ${ipa} ${badge} ${pos}</div>` +
+                `<div style="margin-top:4px; color:${nghia ? '#111827' : '#b45309'};">` +
+                `${nghia || '⚠️ Chưa tra được nghĩa tự động (Google đang giới hạn) — thử lại sau vài giây.'}</div>` +
+                (d.example ? `<div style="margin-top:4px; color:#475569; font-style:italic;">“${d.example}”</div>` : '') +
+                (nghia ? `<button onclick="luuTuVuaTra()" style="background:#eab308; width:auto; margin-top:8px; padding:5px 14px; font-size:13px;">⭐ Lưu vào Sổ tay</button>` : '');
+        } catch (e) {
+            o.innerHTML = '<span style="color:#b91c1c;">❌ Không tra được (máy chủ đang bận). Thử lại sau.</span>';
+        }
+    }
+
+    async function luuTuVuaTra() {
+        if (!_ketQuaTraTu) return;
+        if (!currentArticleId) { alert('Hãy mở 1 bài đọc trước rồi lưu từ vào Sổ tay của bài đó.'); return; }
+        if (!currentVocabData) currentVocabData = [];
+        let daCo = currentVocabData.some(v => (v.word || '').toLowerCase() === _ketQuaTraTu.word.toLowerCase());
+        if (!daCo) currentVocabData.push({ ..._ketQuaTraTu, is_saved: true });
+        else currentVocabData.forEach(v => {
+            if ((v.word || '').toLowerCase() === _ketQuaTraTu.word.toLowerCase()) v.is_saved = true;
+        });
+        try {
+            await supabaseClient.from('articles').update({ vocab_data: currentVocabData }).eq('id', currentArticleId);
+            let art = userArticlesData.find(a => a.id === currentArticleId);
+            if (art) art.vocab_data = currentVocabData;
+            document.getElementById('tra-tu-ket-qua').innerHTML += '<div style="color:#059669; margin-top:6px;">✅ Đã lưu vào Sổ tay của bài này.</div>';
+            _ketQuaTraTu = null;
+        } catch (e) {
+            document.getElementById('tra-tu-ket-qua').innerHTML += '<div style="color:#b91c1c; margin-top:6px;">❌ Lưu thất bại — thử lại.</div>';
+        }
+    }
+
     // 🔧 VÁ DỮ LIỆU TRỐNG CHO MỌI BÀI ĐỌC (cũ lẫn mới): tra ĐỒNG LOẠT IPA/cấp độ/nghĩa/ví dụ
     // rồi LƯU NGƯỢC Supabase — bài cũ mở 1 lần là được sửa VĨNH VIỄN, không cần tải lại bài mới.
     async function repairVocabData(articleId) {
@@ -787,55 +872,87 @@
         let words = [...new Set(canSua.map(i => (currentVocabData[i].word || "").toLowerCase()))].filter(Boolean);
         if (words.length === 0) return;
 
-        try {
-            // Vá dữ liệu hàng loạt có thể chạy Google + dự phòng MyMemory nên cho tới 60s (thay vì 7s)
-            let res = await fetchWithTimeout('http://127.0.0.1:8000/tu-dien-ho-tro', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ words })
-            }, 60000);
-            if (!res.ok) return;
-            let data = await res.json();
-            let results = data.results || {};
-            let thayDoi = false;
+        // Bản đồ từ -> các dòng cần cập nhật (1 từ có thể xuất hiện ở nhiều dòng)
+        let dongCuaTu = new Map();
+        canSua.forEach(i => {
+            let w = (currentVocabData[i].word || "").toLowerCase();
+            if (!w) return;
+            if (!dongCuaTu.has(w)) dongCuaTu.set(w, []);
+            dongCuaTu.get(w).push(i);
+        });
 
-            canSua.forEach(i => {
-                let v = currentVocabData[i];
-                let kq = results[(v.word || "").toLowerCase()] || results[v.word];
-                if (!kq) return;
-                if (kq.meaning && !kq.meaning.includes("Đang cập nhật")) { v.meaning = kq.meaning; }
-                if (kq.ipa) { v.ipa = kq.ipa; }
-                if (kq.level) { v.level = kq.level; levelMap[v.word] = kq.level; }
-                if (kq.example) { v.example = kq.example; }
-                if (kq.audio && !v.audio) { v.audio = kq.audio; }
-                if (kq.pos && !v.pos) { v.pos = kq.pos; posMap[v.word] = kq.pos; }   // từ loại cũng vá cho bài cũ
-                thayDoi = true;
+        let thayDoi = false;
 
-                // Cập nhật DOM ngay
-                let el = document.getElementById(`mean-display-${i}`);
-                if (el) el.innerHTML = v.meaning || el.innerHTML;
-                let ipaEl = document.getElementById(`ipa-warn-${i}`);
-                if (ipaEl) ipaEl.innerText = v.ipa ? `/ ${v.ipa} /` : ipaEl.innerText;
-                let lvlEl = document.getElementById(`level-badge-${i}`);
-                if (lvlEl) lvlEl.innerText = v.level;
-                let posEl = document.getElementById(`pos-badge-${i}`);
-                if (posEl && v.pos) posEl.innerText = v.pos;
-                // Nếu bảng chi tiết đang hiển thị chính từ này thì cập nhật luôn
-                let infoWord = document.getElementById('info-word');
-                if (infoWord && cung_tu(infoWord.innerText, v.word)) {
-                    if (v.meaning) document.getElementById('info-meaning').innerText = v.meaning;
-                    if (v.ipa) document.getElementById('info-ipa').innerText = v.ipa;
-                    if (v.level) document.getElementById('info-level').innerText = v.level;
-                    if (v.pos) document.getElementById('info-pos').innerText = v.pos;
+        // 🚚 GỬI THEO TỪNG MẺ 60 TỪ. Trước đây gửi TẤT CẢ trong 1 request → bài vài nghìn từ
+        //    vượt 60s → catch rỗng → MỌI từ kẹt vĩnh viễn ở "⏳ Đang tự động tra nghĩa".
+        //    Chia mẻ: mẻ nào lỗi chỉ mất mẻ đó, các mẻ sau vẫn chạy tiếp.
+        const MOI_ME = 60;
+        for (let bd = 0; bd < words.length; bd += MOI_ME) {
+            let me = words.slice(bd, bd + MOI_ME);
+            let results = {};
+            try {
+                let res = await fetchWithTimeout('http://127.0.0.1:8000/tu-dien-ho-tro', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ words: me })
+                }, 25000);
+                if (res.ok) {
+                    let data = await res.json();
+                    results = data.results || {};
                 }
-            });
+            } catch (e) { /* mẻ lỗi mạng → đi tiếp mẻ sau, KHÔNG bỏ cả bài */ }
 
-            // LƯU NGƯỢC LẠI CƠ SỞ DỮ LIỆU — bài cũ tự sửa VĨNH VIỄN
-            if (thayDoi && articleId) {
+            me.forEach(w => {
+                let kq = results[w];
+                if (!kq) return;
+                (dongCuaTu.get(w) || []).forEach(i => {
+                    let v = currentVocabData[i];
+                    if (kq.meaning && !kq.meaning.includes("Đang cập nhật")) { v.meaning = kq.meaning; }
+                    if (kq.ipa) { v.ipa = kq.ipa; }
+                    if (kq.level) { v.level = kq.level; levelMap[v.word] = kq.level; }
+                    if (kq.example) { v.example = kq.example; }
+                    if (kq.audio && !v.audio) { v.audio = kq.audio; }
+                    if (kq.pos && !v.pos) { v.pos = kq.pos; posMap[v.word] = kq.pos; }   // từ loại cũng vá cho bài cũ
+                    thayDoi = true;
+
+                    // Cập nhật DOM ngay
+                    let el = document.getElementById(`mean-display-${i}`);
+                    if (el) el.innerHTML = v.meaning || el.innerHTML;
+                    let ipaEl = document.getElementById(`ipa-warn-${i}`);
+                    if (ipaEl) ipaEl.innerText = v.ipa ? `/ ${v.ipa} /` : ipaEl.innerText;
+                    let lvlEl = document.getElementById(`level-badge-${i}`);
+                    if (lvlEl) lvlEl.innerText = v.level;
+                    let posEl = document.getElementById(`pos-badge-${i}`);
+                    if (posEl && v.pos) posEl.innerText = v.pos;
+                    // Nếu bảng chi tiết đang hiển thị chính từ này thì cập nhật luôn
+                    let infoWord = document.getElementById('info-word');
+                    if (infoWord && cung_tu(infoWord.innerText, v.word)) {
+                        if (v.meaning) document.getElementById('info-meaning').innerText = v.meaning;
+                        if (v.ipa) document.getElementById('info-ipa').innerText = v.ipa;
+                        if (v.level) document.getElementById('info-level').innerText = v.level;
+                        if (v.pos) document.getElementById('info-pos').innerText = v.pos;
+                    }
+                });
+            });
+        }
+
+        // ✅ Từ nào vẫn chưa có nghĩa: đổi "⏳ Đang tự động tra nghĩa..." thành lời mời bấm tra.
+        //    Thà nói thật "chưa tra được" còn hơn treo vòng xoay vĩnh viễn gây ức chế.
+        canSua.forEach(i => {
+            let v = currentVocabData[i];
+            let chuaCo = !v.meaning || v.meaning.includes("Đang cập nhật") || v.meaning === "Không thể dịch tự động.";
+            if (!chuaCo) return;
+            let el = document.getElementById(`mean-display-${i}`);
+            if (el) el.innerHTML = '<span style="color:#b45309; font-weight:normal;">⚠️ Chưa tra được nghĩa — bấm vào từ để tra</span>';
+        });
+
+        // LƯU NGƯỢC LẠI CƠ SỞ DỮ LIỆU — bài cũ tự sửa VĨNH VIỄN
+        if (thayDoi && articleId) {
+            try {
                 await supabaseClient.from('articles').update({ vocab_data: currentVocabData }).eq('id', articleId);
                 // Cập nhật luôn bản ghi trong bộ nhớ — mở lại là có sẵn ngay, không cần chờ mạng
                 let art = userArticlesData.find(a => a.id === articleId);
                 if (art) art.vocab_data = currentVocabData;
-            }
         } catch (e) {}
+        }
     }
 
     // Màu tô theo cấp độ CEFR — A1/A2 hoặc cấp độ chưa rõ trả 'transparent' (KHÔNG tô màu,

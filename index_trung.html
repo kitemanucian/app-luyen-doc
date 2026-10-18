@@ -80,6 +80,14 @@
         #tu-ghep-status-trung { font-size: 12px; color: #b45309; margin: 4px 0; }
         #tu-ghep-note-trung { font-size: 11px; color: #d97706; margin-top: 4px; }
 
+        /* 🔍 TRA TỪ NHANH — gõ chữ Hán / pinyin / âm Hán Việt */
+        #tra-tu-panel-trung { display: none; margin: 12px 0 4px 0; background: #fff7ed; border: 1px solid #fdba74; border-radius: 8px; padding: 10px 12px; }
+        #tra-tu-input-trung { flex: 1; min-width: 150px; width: auto; margin: 0; padding: 8px 10px; background: #fff; }
+        #tra-tu-status-trung { font-size: 12px; color: #9a3412; margin-top: 6px; }
+        #tra-tu-goiy-trung { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+        #tra-tu-ketqua-trung { margin-top: 8px; background: #fff; border: 1px dashed #fdba74; border-radius: 6px; padding: 10px; }
+        #tra-tu-ketqua-trung:empty { display: none; }
+
         /* Tooltip */
         #custom-tooltip {
             position: absolute; background-color: #1f2937; color: #f9fafb; padding: 15px 20px;
@@ -150,6 +158,19 @@
             <input type="text" id="search-bar" onkeyup="filterArticles()" placeholder="🔍 Tìm kiếm bài đọc..." style="background-color: #f8fafc; margin-top: 0;">
 
             <ul id="article-list" style="list-style-type: none; padding: 0; margin: 0; max-height: 250px; overflow-y: auto; border: 1px solid #cbd5e1; border-radius: 5px;"></ul>
+
+            <!-- 🔍 TRA TỪ NHANH: gõ chữ Hán / pinyin / âm Hán Việt để tra BẤT KỲ từ nào (không cần mở bài) -->
+            <button type="button" onclick="moTraTuTrung()" style="background:#f97316; width:auto; padding:8px 15px; margin:12px 0 0 0;">🔍 Tra từ tiếng Trung</button>
+            <div id="tra-tu-panel-trung">
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <input type="text" id="tra-tu-input-trung" autocomplete="off" placeholder="Gõ chữ Hán (学习), pinyin (xuexi) hoặc âm Hán Việt (học tập)…" onkeydown="if(event.key==='Enter'){event.preventDefault();traTuTrungNhanh();}">
+                    <button type="button" onclick="traTuTrungNhanh()" style="background:#ea580c; width:auto; padding:8px 18px; margin:0;">Tra</button>
+                    <button type="button" onclick="dongTraTuTrung()" style="background:#6b7280; width:auto; padding:8px 14px; margin:0;">✕</button>
+                </div>
+                <div id="tra-tu-status-trung">👉 Gõ chữ Hán, pinyin không dấu (xuexi) hoặc âm Hán Việt (học tập) rồi bấm Tra.</div>
+                <div id="tra-tu-goiy-trung"></div>
+                <div id="tra-tu-ketqua-trung"></div>
+            </div>
 
             <hr style="margin: 20px 0; border-top: 1px dashed #cbd5e1;">
 
@@ -1358,6 +1379,180 @@
     function applyHighlightAndPhraseTrung() {
         applyHighlight();
         if (cumTuChonTrung) bamCumTuTrung(cumTuChonTrung);
+    }
+
+    // ============================================================
+    // 16. 🔍 TRA TỪ NHANH — GÕ CHỮ HÁN / PINYIN / ÂM HÁN VIỆT
+    // ============================================================
+    let traTuTrungSeq = 0;
+    let traTuTrungDangChon = null;
+    let traTuTrungDangTai = false;   // đang chờ nghĩa tiếng Việt từ Google
+
+    function moTraTuTrung() {
+        const p = document.getElementById('tra-tu-panel-trung');
+        if (!p) return;
+        p.style.display = 'block';
+        const o = document.getElementById('tra-tu-input-trung');
+        if (o) { o.focus(); o.select(); }
+    }
+    function dongTraTuTrung() {
+        const p = document.getElementById('tra-tu-panel-trung');
+        if (p) p.style.display = 'none';
+    }
+
+    async function traTuTrungNhanh() {
+        const o = document.getElementById('tra-tu-input-trung');
+        const q = ((o && o.value) || '').trim();
+        const status = document.getElementById('tra-tu-status-trung');
+        const goiY = document.getElementById('tra-tu-goiy-trung');
+        const kqBox = document.getElementById('tra-tu-ketqua-trung');
+        traTuTrungSeq += 1;
+        const seq = traTuTrungSeq;
+        traTuTrungDangChon = null;
+        if (goiY) goiY.innerHTML = '';
+        if (kqBox) kqBox.innerHTML = '';
+        if (!q) {
+            if (status) status.innerText = '👉 Gõ chữ Hán (学习), pinyin (xuexi) hoặc âm Hán Việt (học tập).';
+            return;
+        }
+        if (status) status.innerText = '⏳ Đang tra...';
+        let data = null;
+        try {
+            const res = await fetchWithTimeout(`http://127.0.0.1:8000/cn/tim-tu?q=${encodeURIComponent(q)}&limit=12`);
+            if (res.ok) data = await res.json();
+        } catch (e) { data = null; }
+        if (seq !== traTuTrungSeq) return;   // đã tra từ khác → bỏ kết quả cũ
+        const ds = (data && Array.isArray(data.results)) ? data.results : [];
+        if (!ds.length) {
+            if (status) status.innerText = '❌ Không tìm thấy từ nào khớp. Thử gõ đúng chữ Hán, hoặc pinyin không dấu (vd: xuexi).';
+            return;
+        }
+        if (status) status.innerText = ds.length > 1
+            ? `🔎 Tìm thấy ${ds.length} từ — bấm 1 từ bên dưới để xem chi tiết.`
+            : '';
+        if (goiY && ds.length > 1) {
+            goiY.innerHTML = ds.map((t, i) =>
+                `<button type="button" class="tughep-chip" data-i="${i}">${escapeHtmlTrung(t.word)}` +
+                `<span class="lvl">${t.level ? hskLabel(String(t.level)) : ''}</span></button>`).join('');
+            Array.from(goiY.querySelectorAll('.tughep-chip')).forEach(b => {
+                b.onclick = () => hienThiKetQuaTraTuTrung(ds[parseInt(b.getAttribute('data-i'))]);
+            });
+        }
+        hienThiKetQuaTraTuTrung(ds[0]);   // luôn xem ngay từ khớp nhất
+    }
+
+    async function hienThiKetQuaTraTuTrung(t) {
+        if (!t || !t.word) return;
+        const tu = t.word;
+        traTuTrungDangChon = {
+            word: tu, pinyin: t.pinyin || '', hanviet: t.hanviet || '',
+            level: t.level || '', trad: t.trad || '', mean_en: t.mean_en || '', meaning: ''
+        };
+        traTuTrungDangTai = true;
+        veKetQuaTraTuTrung();
+        const seq = ++traTuTrungSeq;   // kết quả cũ trả về muộn sẽ bị bỏ
+        try {
+            const [rNghia, rTra] = await Promise.all([
+                fetchWithTimeout(`http://127.0.0.1:8000/cn/nghia/${encodeURIComponent(tu)}`).catch(() => null),
+                fetchWithTimeout(`http://127.0.0.1:8000/cn/tra-tu/${encodeURIComponent(tu)}`).catch(() => null)
+            ]);
+            if (seq !== traTuTrungSeq || !traTuTrungDangChon || traTuTrungDangChon.word !== tu) return;
+            if (rNghia && rNghia.ok) {
+                const d = await rNghia.json();
+                if (d && d.meaning) traTuTrungDangChon.meaning = d.meaning;
+            }
+            if (rTra && rTra.ok) {
+                const d = await rTra.json();
+                if (d) {
+                    traTuTrungDangChon.pinyin = d.pinyin || traTuTrungDangChon.pinyin;
+                    traTuTrungDangChon.hanviet = d.hanviet || traTuTrungDangChon.hanviet;
+                    traTuTrungDangChon.level = d.level || traTuTrungDangChon.level;
+                    traTuTrungDangChon.trad = d.trad || traTuTrungDangChon.trad;
+                }
+            }
+        } catch (e) {}
+        if (seq !== traTuTrungSeq) return;
+        traTuTrungDangTai = false;
+        veKetQuaTraTuTrung();
+    }
+
+    function veKetQuaTraTuTrung() {
+        const box = document.getElementById('tra-tu-ketqua-trung');
+        const t = traTuTrungDangChon;
+        if (!box || !t) return;
+        const lvl = t.level
+            ? `<span style="background:${hskColor(t.level)}; color:#1f2937; padding:2px 8px; border-radius:5px; font-size:12px; font-weight:bold;">${hskLabel(t.level)}</span>`
+            : '';
+        const trad = (t.trad && t.trad !== t.word)
+            ? `<span style="color:#9ca3af; font-size:20px;">${escapeHtmlTrung(t.trad)}</span>` : '';
+        const meanEn = t.mean_en
+            ? `<div style="font-size:12px; color:#6b7280; margin-top:4px;">🇬🇧 ${escapeHtmlTrung(t.mean_en)}</div>` : '';
+        const trongBai = (currentVocabData || []).find(v => v && v.word === t.word);
+        const nutLuu = (trongBai && trongBai.is_saved)
+            ? `<button type="button" disabled style="background:#d1d5db; width:auto; padding:6px 14px; margin:0;">⭐ Đã có trong Sổ tay</button>`
+            : `<button type="button" onclick="luuTuTraCuuTrung()" style="background:#eab308; width:auto; padding:6px 14px; margin:0;">⭐ Thêm vào Sổ tay</button>`;
+        box.innerHTML = `
+            <div style="display:flex; align-items:flex-start; gap:14px; flex-wrap:wrap;">
+                <div style="font-size:30px; font-weight:bold; color:#7f1d1d; line-height:1.2;">${escapeHtmlTrung(t.word)} ${trad}</div>
+                <div style="padding-top:4px; font-size:14px; flex:1; min-width:180px;">
+                    <div><b>Pinyin:</b> ${escapeHtmlTrung(t.pinyin || '—')} &nbsp;·&nbsp; <b>Hán Việt:</b> ${escapeHtmlTrung(t.hanviet || '—')} &nbsp; ${lvl}</div>
+                    <div style="margin-top:5px;"><b>Nghĩa:</b> ${t.meaning
+                        ? escapeHtmlTrung(t.meaning)
+                        : (traTuTrungDangTai
+                            ? '<span style="color:#dc2626;">⏳ Đang lấy nghĩa...</span>'
+                            : `<span style="color:#b45309;">(chưa dịch được nghĩa tiếng Việt${t.mean_en ? ' — xem nghĩa tiếng Anh bên dưới' : ''})</span> <button type="button" onclick="thuLaiNghiaTraTuTrung()" style="background:#f59e0b; width:auto; padding:2px 8px; margin:0; font-size:12px;">🔄 Thử lại</button>`)}</div>
+                    ${meanEn}
+                </div>
+            </div>
+            <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                <button type="button" onclick="ngheTuTraCuuTrung()" style="background:#3b82f6; width:auto; padding:6px 14px; margin:0;">🔊 Nghe</button>
+                ${nutLuu}
+                <span id="tra-tu-loi-trung" style="font-size:12px; color:#b91c1c;"></span>
+            </div>`;
+    }
+
+    function ngheTuTraCuuTrung() {
+        if (traTuTrungDangChon && traTuTrungDangChon.word) speakTTS(traTuTrungDangChon.word);
+    }
+    function thuLaiNghiaTraTuTrung() {
+        if (traTuTrungDangChon && traTuTrungDangChon.word) hienThiKetQuaTraTuTrung(traTuTrungDangChon);
+    }
+
+    // Lưu từ vừa tra vào Sổ tay của BÀI ĐANG MỞ (tạo mục từ vựng mới nếu từ chưa có trong bài)
+    async function luuTuTraCuuTrung() {
+        const t = traTuTrungDangChon;
+        if (!t || !t.word) return;
+        const loi = document.getElementById('tra-tu-loi-trung');
+        if (!currentArticleId) {
+            if (loi) loi.innerText = '⚠️ Hãy mở 1 bài đọc trước — từ sẽ được lưu vào Sổ tay của bài đó.';
+            return;
+        }
+        let v = (currentVocabData || []).find(x => x && x.word === t.word);
+        const daLuuTruoc = !!(v && v.is_saved);
+        const daThemMoi = !v;
+        if (!v) {
+            v = {
+                word: t.word, pinyin: t.pinyin || '', hanviet: t.hanviet || '', level: t.level || '',
+                trad: t.trad || '', mean_en: t.mean_en || '', meaning: t.meaning || '',
+                surfaceForms: [t.word], is_saved: true, nguon: 'tra-tay'
+            };
+            currentVocabData.push(v);
+        }
+        v.is_saved = true;
+        if (loi) loi.innerText = '⏳ Đang lưu...';
+        try {
+            await supabaseClient.from('articles').update({ vocab_data: currentVocabData }).eq('id', currentArticleId);
+            const art = userArticlesData.find(a => a.id === currentArticleId);
+            if (art) art.vocab_data = currentVocabData;
+            renderVocabTable();
+            veKetQuaTraTuTrung();
+            const s = document.getElementById('tra-tu-loi-trung');
+            if (s) { s.style.color = '#15803d'; s.innerText = '✅ Đã thêm vào Sổ tay.'; }
+        } catch (e) {
+            v.is_saved = daLuuTruoc;
+            if (daThemMoi) currentVocabData = currentVocabData.filter(x => x !== v);
+            if (loi) { loi.style.color = '#b91c1c'; loi.innerText = '❌ Lưu thất bại — thử lại.'; }
+        }
     }
 
     checkUser();

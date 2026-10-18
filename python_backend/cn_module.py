@@ -11,6 +11,7 @@ TÍNH NĂNG TIẾNG TRUNG 🇨🇳 — MÔ-ĐUN RIÊNG BIỆT
 import json
 import os
 import re
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 
 import cv2
@@ -317,6 +318,96 @@ def lay_cap_do_cn(req: CnLevelRequest):
         lv = cap_do_cua_tu(w)
         levels[w] = str(lv) if lv else ""
     return {"levels": levels}
+
+
+# ============================================================
+# 6.2 🔍 TRA TỪ TỰ DO: GÕ CHỮ HÁN / PINYIN KHÔNG DẤU / ÂM HÁN VIỆT
+#     Ví dụ: "学习", "xuexi", "xué xí", "học tập" → đều ra 学习
+# ============================================================
+def _khong_dau(s: str) -> str:
+    """Chuẩn hoá để so khớp: bỏ dấu thanh, bỏ khoảng trắng/gạch nối, lower.
+    xué xí -> xuexi | học tập -> hoctap | Ā lā bó yǔ -> alaboyu"""
+    s = (s or "").replace("ü", "u").replace("Ü", "U").replace("ǖ", "u").replace("ǘ", "u").replace("ǚ", "u").replace("ǜ", "u")
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return re.sub(r"[\s'’\-\u00b7]+", "", s).lower()
+
+
+# Bảng tra siêu nhanh (dựng 1 lần khi khởi động): (pinyin không dấu, hán việt không dấu, từ)
+BANG_TRA_TU = [
+    (_khong_dau(w.get("py") or ""), _khong_dau(w.get("hv") or ""), tu)
+    for tu, w in HSK.items()
+]
+
+
+def _thong_tin_tu(tu: str) -> dict:
+    """Thông tin 1 từ theo đúng định dạng các API khác đang dùng."""
+    w = HSK.get(tu) or {}
+    lv = cap_do_cua_tu(tu)
+    return {
+        "word": tu,
+        "pinyin": (w.get("py") or "").strip() or pinyin_cua(tu),
+        "hanviet": (w.get("hv") or "").strip() or am_han_viet_cua_tu(tu),
+        "level": str(lv) if lv else "",
+        "trad": w.get("trad", "") or "",
+        "mean_en": w.get("mean", "") or "",
+        "trong_hsk": bool(w),
+    }
+
+
+@router.get("/tim-tu")
+def tim_tu_cn(q: str = "", limit: int = 12):
+    """Tra từ tự do: chữ Hán, pinyin (có/không dấu) hoặc âm Hán Việt.
+    Trả tối đa `limit` kết quả, ưu tiên: khớp đúng → bắt đầu bằng → chứa, rồi cấp độ dễ trước."""
+    truy_van = (q or "").strip()
+    if not truy_van:
+        return {"q": "", "results": []}
+    try:
+        limit = max(1, min(int(limit), 30))
+    except (TypeError, ValueError):
+        limit = 12
+
+    # 1) Người dùng gõ CHỮ HÁN → tra trực tiếp, không khớp thì gợi ý từ HSK chứa cụm đó
+    if la_chu_han(truy_van):
+        tu = re.sub(r"\s+", "", truy_van)
+        kq = []
+        if tu in HSK or len(tu) > 1:
+            kq.append(_thong_tin_tu(tu))
+        for t in HSK:
+            if len(kq) >= limit:
+                break
+            if t != tu and tu in t and 2 <= len(t) <= 6:
+                kq.append(_thong_tin_tu(t))
+        if not kq:
+            kq.append(_thong_tin_tu(tu))  # vẫn trả pinyin + Hán Việt để người dùng thấy
+        return {"q": truy_van, "results": kq[:limit]}
+
+    # 2) Pinyin / âm Hán Việt (ASCII) → so khớp trên bảng dựng sẵn
+    khoa = _khong_dau(truy_van)
+    if not khoa:
+        return {"q": truy_van, "results": []}
+
+    def diem(khoa_tu: str) -> int:
+        if khoa_tu == khoa:
+            return 0
+        if khoa_tu.startswith(khoa):
+            return 1
+        if khoa in khoa_tu:
+            return 2
+        return 99
+
+    ung_vien = []
+    for py, hv, tu in BANG_TRA_TU:
+        d = min(diem(py), diem(hv))
+        if d < 99:
+            lv = cap_do_cua_tu(tu) or 99
+            ung_vien.append((d, lv, len(tu), tu))
+    ung_vien.sort()
+
+    ket_qua = []
+    for _, _, _, tu in ung_vien[:limit]:
+        ket_qua.append(_thong_tin_tu(tu))
+    return {"q": truy_van, "results": ket_qua}
 
 
 # ============================================================

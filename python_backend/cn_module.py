@@ -8,6 +8,7 @@ TÍNH NĂNG TIẾNG TRUNG 🇨🇳 — MÔ-ĐUN RIÊNG BIỆT
     hanviet.json  (13.224 ký tự Giản + Phồn -> Âm Hán Việt)
 - Pinyin tự sinh bằng pypinyin; nghĩa tiếng Việt dịch Google (zh -> vi) GỘP MẺ.
 """
+import html
 import json
 import os
 import re
@@ -142,8 +143,51 @@ def la_dau_cau(doan: str) -> bool:
     return not la_chu_han(doan)
 
 
+def dich_mymemory_cn(tu: str) -> str:
+    """Dịch dự phòng Trung -> Việt bằng MyMemory (Google hay bị chặn từ server/Render).
+    Có thể đặt biến môi trường MYMEMORY_EMAIL để tăng hạn mức miễn phí."""
+    try:
+        tham_so = {"q": tu, "langpair": "zh-CN|vi"}
+        email = (os.environ.get("MYMEMORY_EMAIL") or "").strip()
+        if email:
+            tham_so["de"] = email
+        r = PHIEN_DICH_CN.get(
+            "https://api.mymemory.translated.net/get", params=tham_so, timeout=8
+        )
+        if r.ok:
+            d = r.json()
+            nghia = (d.get("responseData") or {}).get("translatedText") or ""
+            nghia = html.unescape(nghia).strip()
+            if nghia and "MYMEMORY WARNING" not in nghia.upper() and "QUERY LENGTH LIMIT" not in nghia.upper():
+                return nghia
+    except Exception:
+        pass
+    return ""
+
+
+def dich_google5_cn(cac_tu) -> list:
+    """Dịch NHIỀU từ trong 1 request qua clients5.google.com (đầu này KHÔNG bị chặn
+    từ server như translate.googleapis.com). Trả list cùng thứ tự đầu vào."""
+    cac_tu = list(cac_tu or [])
+    if not cac_tu:
+        return []
+    tham_so = [("client", "dict-chrome-ex"), ("sl", "zh-CN"), ("tl", "vi")]
+    tham_so += [("q", t) for t in cac_tu]
+    try:
+        r = PHIEN_DICH_CN.get(
+            "https://clients5.google.com/translate_a/t", params=tham_so, timeout=10
+        )
+        if r.ok:
+            d = r.json()
+            if isinstance(d, list) and len(d) == len(cac_tu):
+                return [x.strip() if isinstance(x, str) else "" for x in d]
+    except Exception:
+        pass
+    return [""] * len(cac_tu)
+
+
 def dich_google_cn(tu: str) -> str:
-    """Dịch 1 từ Trung -> Việt. Chỉ cache kết quả KHÔNG rỗng."""
+    """Dịch 1 từ Trung -> Việt: Google gtx → clients5 → MyMemory. Chỉ cache kết quả KHÔNG rỗng."""
     if tu in CACHE_DICH_CN:
         return CACHE_DICH_CN[tu]
     nghia = ""
@@ -157,6 +201,10 @@ def dich_google_cn(tu: str) -> str:
             nghia = "".join(doan[0] for doan in r.json()[0] if doan and doan[0])
     except Exception:
         nghia = ""
+    if not nghia:
+        nghia = (dich_google5_cn([tu]) or [""])[0]   # 🔁 Google đầu dự phòng
+    if not nghia:
+        nghia = dich_mymemory_cn(tu)                   # 🔁 cuối cùng: MyMemory
     if nghia:
         CACHE_DICH_CN[tu] = nghia
     return nghia
@@ -184,11 +232,17 @@ def dich_google_cn_hang_loat(cac_tu) -> dict:
                         ban_dich[doan[1].strip()] = doan[0].strip()
         except Exception:
             pass
-        for t in me:
-            if t not in ban_dich:
-                n = dich_google_cn(t)
+        # 🔁 Dự phòng 1: clients5.google.com — dịch 25 từ / request, rất nhanh
+        con_thieu = [t for t in me if t not in ban_dich]
+        if con_thieu:
+            for t, n in zip(con_thieu[:25], dich_google5_cn(con_thieu[:25])):
                 if n:
                     ban_dich[t] = n
+        # 🔁 Dự phòng 2 (cuối): MyMemory — tối đa 15 từ MỖI MẺ để không làm chậm bài dài
+        for t in [t for t in me if t not in ban_dich][:15]:
+            n = dich_mymemory_cn(t)
+            if n:
+                ban_dich[t] = n
         return ban_dich
 
     with ThreadPoolExecutor(max_workers=min(4, len(cac_me))) as tram:

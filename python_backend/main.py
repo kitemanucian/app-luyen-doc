@@ -15,18 +15,72 @@ try:
 except Exception:
     pass
 
-import cv2
-import numpy as np
-import pymupdf  # Thư viện đọc PDF (PyMuPDF) — dùng tên mới để hết cảnh báo fitz deprecated
-import pytesseract
+import sys
 import requests  # Gọi Gemini AI từ backend
-import spacy
+
+
+# 🔋 THƯ VIỆN NẶNG — CHỈ NẠP KHI THỰC SỰ CẦN
+# Vì sao: Render Free chỉ có 0.1 CPU + 512MB RAM. Nếu nạp sẵn cv2/PyMuPDF/OCR/spaCy
+# ngay lúc khởi động thì app mất 60-120 giây mới "sống" (Render dễ coi là chết → web sập)
+# và tốn ~150MB RAM vô ích khi chỉ cần đọc bài. Nay chúng chỉ được nạp khi có người
+# tải PDF/ảnh lên, hoặc lần đầu phân tích bài tiếng Anh.
+class _NapSau:
+    """Đóng giả module: lần đầu ai đó dùng (.thuoc_tinh) mới thực sự import."""
+
+    def __init__(self, ten: str):
+        self._ten = ten
+        self._m = None
+
+    def __getattr__(self, ten_thuoc_tinh: str):
+        if self._m is None:
+            import importlib
+            print(f"⏳ Nạp thư viện {self._ten} (lần đầu dùng)...")
+            self._m = importlib.import_module(self._ten)
+        return getattr(self._m, ten_thuoc_tinh)
+
+
+cv2 = _NapSau("cv2")
+np = _NapSau("numpy")
+pymupdf = _NapSau("pymupdf")   # đọc PDF
+pytesseract = _NapSau("pytesseract")
+
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 app = FastAPI()
+THOI_DIEM_KHOI_DONG = time.time()
+
+
+def _ram_mb() -> int:
+    """RAM đỉnh đã dùng (MB) — để thấy trong Logs nếu app bị Render giết vì hết RAM."""
+    try:
+        import resource
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return int(rss / (1024 * 1024)) if sys.platform == "darwin" else int(rss / 1024)
+    except Exception:
+        return 0
+
+
+@app.get("/healthz")
+def healthz():
+    """🩺 NHỊP TIM SIÊU NHẸ: trả lời ngay, cho biết app còn sống + đang dùng bao nhiêu RAM."""
+    return {
+        "ok": True,
+        "rss_mb": _ram_mb(),
+        "uptime_giay": int(time.time() - THOI_DIEM_KHOI_DONG),
+    }
+
+
+def _theo_doi_ram():
+    """In RAM mỗi 5 phút vào Logs — sau này nhìn Logs là biết app có bị giết vì hết RAM không."""
+    while True:
+        time.sleep(300)
+        print(f"🧠 RAM đỉnh: {_ram_mb()} MB | uptime {int(time.time() - THOI_DIEM_KHOI_DONG)}s")
+
+
+threading.Thread(target=_theo_doi_ram, daemon=True).start()
 
 # 1. MỞ KHÓA CORS CHO TRÌNH DUYỆT GIAO TIẾP
 # Mặc định "*" y như trước (chạy local không đổi gì).
@@ -42,13 +96,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 2. KHỞI ĐỘNG NÃO BỘ NLP (spaCy)
-print("⏳ Đang tải mô hình Ngôn ngữ học spaCy...")
+# 2. NÃO BỘ NLP (spaCy) — NẠP LƯỜI
 # ⚠️ CHỈ nạp tagger + attribute_ruler + lemmatizer (bỏ "parser" và "ner").
 # Web này không dùng cây phụ thuộc / thực thể, mà 2 tầng đó ngốn phần lớn RAM
 # → bài dài hàng chục nghìn từ là nổ hạn mức 512MB của Render.
-nlp = spacy.load("en_core_web_sm", exclude=["parser", "ner"])
-print("✅ Đã tải xong spaCy!")
+_nlp = None
+
+
+def lay_nlp():
+    """Trả về mô hình spaCy, chỉ nạp đúng 1 lần khi có bài tiếng Anh đầu tiên.
+    Nhờ vậy lúc khởi động app nhẹ và nhanh hơn hẳn (rất quan trọng với Render Free)."""
+    global _nlp
+    if _nlp is None:
+        import spacy
+        print("⏳ Đang tải mô hình Ngôn ngữ học spaCy (lần đầu dùng)...")
+        _nlp = spacy.load("en_core_web_sm", exclude=["parser", "ner"])
+        print("✅ Đã tải xong spaCy!")
+    return _nlp
 
 # 3. NẠP TỪ ĐIỂN VÀO RAM (Bao gồm cả Cấp độ, Phiên âm và Nghĩa)
 TU_DIEN = {}
@@ -189,7 +253,7 @@ def pos_tieng_viet(tu: str, type_tu_dien: str = "", nhan_spacy: str = "") -> str
         return POS_SPACY_TV.get(nhan_spacy, nhan_spacy)
     if not tu:
         return ""
-    doc = nlp(tu)
+    doc = lay_nlp()(tu)
     if len(doc) > 0:
         return POS_SPACY_TV.get(doc[0].pos_, doc[0].pos_)
     return ""
@@ -242,7 +306,7 @@ def lemmatize_danh_sach(cac_tu: list[str]) -> list[str]:
     thành nhiều token."""
     if not cac_tu:
         return []
-    doc = nlp(" ".join(cac_tu))
+    doc = lay_nlp()(" ".join(cac_tu))
     # Offset (vị trí ký tự) bắt đầu của từng từ trong chuỗi đã nối (mỗi từ cách 1 dấu cách)
     bat_dau = []
     vi_tri = 0
@@ -283,7 +347,7 @@ def lemmatize_va_pos(cac_tu: list[str]):
     """
     if not cac_tu:
         return [], {}
-    doc = nlp(" ".join(cac_tu))
+    doc = lay_nlp()(" ".join(cac_tu))
     bat_dau = []
     vi_tri = 0
     for w in cac_tu:
@@ -455,7 +519,7 @@ def chia_van_ban(van_ban: str, moi_man: int = MAN_TOI_DA):
 
 def cac_token(van_ban: str):
     """Duyệt token theo từng mẻ — bộ nhớ KHÔNG phình theo độ dài bài."""
-    for man in nlp.pipe(chia_van_ban(van_ban), batch_size=BATCH_SPACY):
+    for man in lay_nlp().pipe(chia_van_ban(van_ban), batch_size=BATCH_SPACY):
         for token in man:
             yield token
 
@@ -557,7 +621,7 @@ def tra_tu_nhanh(word: str):
         return CACHE_TRA_TU[tu_sach]
     
     # 🛠️ GỌT ĐUÔI TỪ THÔNG MINH BẰNG SPACY (vd: descendants -> descendant)
-    doc = nlp(tu_sach)
+    doc = lay_nlp()(tu_sach)
     tu_goc = doc[0].lemma_.lower() if len(doc) > 0 else tu_sach
     
     # Ưu tiên 1: Lấy trong RAM (từ điển B1-C2) — có IPA, ví dụ, audio sẵn.
@@ -605,7 +669,7 @@ def lay_nghia(word: str):
     if tu in CACHE_NGHIA:
         return {"word": tu, "meaning": CACHE_NGHIA[tu]}
     # Gọt gốc từ (houses -> house) để dịch chuẩn và trúng cache nhiều hơn
-    doc = nlp(tu)
+    doc = lay_nlp()(tu)
     tu_goc = doc[0].lemma_.lower() if len(doc) > 0 else tu
     nghia = dich_google(tu_goc)
     if nghia:
@@ -788,7 +852,7 @@ def tra_ho_tu(word: str):
     gia_dinh = HO_TU.get(tu)
     tu_goc = tu
     if gia_dinh is None:
-        doc = nlp(tu)
+        doc = lay_nlp()(tu)
         tu_goc = doc[0].lemma_.lower() if len(doc) > 0 else tu
         gia_dinh = HO_TU.get(tu_goc)
     if gia_dinh:
@@ -856,6 +920,11 @@ def tim_cum_tu(req: CumTuRequest):
 def doc_tai_lieu(file: UploadFile = File(...)):
     noi_dung_file = file.file.read()
     van_ban_tho = ""
+    so_trang_bi_cat = 0
+
+    # 🛡️ PHANH CHỐNG NỔ RAM: gói Free chỉ có 512MB, file/video quá lớn là bị Render giết ngay
+    if len(noi_dung_file) > 25 * 1024 * 1024:
+        return {"error": "File quá lớn (giới hạn 25MB). Bạn chia nhỏ file rồi tải lại giúp mình nhé!"}
     # file.filename có thể là None (theo kiểu FastAPI) -> phải bảo vệ trước khi gọi .lower()
     filename = (file.filename or "").lower()
     
@@ -863,7 +932,9 @@ def doc_tai_lieu(file: UploadFile = File(...)):
         # 1. NẾU LÀ FILE PDF
         if filename.endswith(".pdf"):
             doc = pymupdf.open(stream=noi_dung_file, filetype="pdf")
-            cac_trang = [str(page.get_text()) for page in doc]
+            # 🛡️ Tối đa 80 trang: PDF vài trăm trang sẽ làm app hết RAM và bị Render giết
+            cac_trang = [str(page.get_text()) for _, page in zip(range(80), doc)]
+            so_trang_bi_cat = max(0, len(doc) - len(cac_trang))
             doc.close()
 
             # --- XÓA HEADER PDF LẶP Ở ĐẦU MỖI TRANG (xử lý TỪNG TRANG, an toàn tuyệt đối) ---
@@ -1017,7 +1088,13 @@ def doc_tai_lieu(file: UploadFile = File(...)):
     if not van_ban_sach.strip():
         return {"error": "Không đọc được chữ nào từ file — PDF có thể không có lớp chữ (bản scan chỉ là ảnh) hoặc ảnh quá mờ. Hãy thử file có chữ chọn được, ảnh rõ nét hơn, hoặc dán văn bản trực tiếp vào ô."}
 
-    return {"text_sach": van_ban_sach.strip()}
+    ket_qua = {"text_sach": van_ban_sach.strip()}
+    if so_trang_bi_cat:
+        ket_qua["canh_bao"] = (
+            f"PDF còn {so_trang_bi_cat} trang chưa đọc (giới hạn 80 trang/lần để web không bị quá tải). "
+            "Bạn chia nhỏ file rồi tải phần tiếp theo nhé!"
+        )
+    return ket_qua
 
 
 # ============================================================

@@ -15,15 +15,40 @@ import re
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 
-import cv2
 import jieba
-import numpy as np
-import pymupdf
-import pytesseract
 import requests
 from fastapi import APIRouter, File, UploadFile
 from pydantic import BaseModel
-from pypinyin import Style, lazy_pinyin
+
+
+# 🔋 Thư viện nặng (OCR/ảnh/PDF) nạp sau khi thực sự cần — xem giải thích trong main.py
+class _NapSau:
+    def __init__(self, ten: str):
+        self._ten = ten
+        self._m = None
+
+    def __getattr__(self, ten_thuoc_tinh: str):
+        if self._m is None:
+            import importlib
+            self._m = importlib.import_module(self._ten)
+        return getattr(self._m, ten_thuoc_tinh)
+
+
+cv2 = _NapSau("cv2")
+np = _NapSau("numpy")
+pymupdf = _NapSau("pymupdf")
+pytesseract = _NapSau("pytesseract")
+
+_PY = None
+
+
+def _pypinyin():
+    """pypinyin ngốn ~40MB RAM — chỉ nạp khi gặp từ KHÔNG có sẵn pinyin trong hsk.json."""
+    global _PY
+    if _PY is None:
+        from pypinyin import Style, lazy_pinyin
+        _PY = (Style, lazy_pinyin)
+    return _PY
 
 router = APIRouter()
 
@@ -39,9 +64,13 @@ with open(os.path.join(DUONG, "hsk.json"), encoding="utf-8") as f:
 HSK_CHAR = {k: v["lv"] for k, v in HSK.items() if len(k) == 1}
 print(f"✅ [Tiếng Trung] Đã nạp {len(HSK)} từ HSK + {len(HSK_CHAR)} chữ đơn.")
 
-# Nạp toàn bộ từ HSK vào bộ cắt từ jieba để chia từ đúng chuẩn từ điển
+# Nạp từ HSK vào bộ cắt từ jieba để chia từ đúng chuẩn từ điển.
+# ⚡ Tối ưu: 11.430/11.470 từ đã có sẵn trong từ điển jieba → chỉ thêm 40 từ còn thiếu
+# (trước đây thêm cả 11.470 từ làm tốn thêm ~50MB RAM và hàng chục giây khởi động).
+jieba.initialize()
 for _tu in HSK:
-    jieba.add_word(_tu)
+    if _tu not in jieba.dt.FREQ:
+        jieba.add_word(_tu)
 
 HAN_VIET = {}
 with open(os.path.join(DUONG, "hanviet.json"), encoding="utf-8") as f:
@@ -73,7 +102,11 @@ else:
 # ============================================================
 def pinyin_cua(tu: str) -> str:
     """Pinyin có dấu thanh: 学习 -> xué xí"""
-    return " ".join(lazy_pinyin(tu, style=Style.TONE))
+    w = HSK.get(tu)
+    if w and (w.get("py") or "").strip():
+        return w["py"].strip()          # ⚡ có sẵn trong hsk.json → không cần pypinyin
+    Style, lp = _pypinyin()
+    return " ".join(lp(tu, style=Style.TONE))
 
 
 def am_han_viet_cua_chu(chu: str, pinyin_tone3: str = "") -> str:
@@ -95,7 +128,11 @@ def am_han_viet_cua_tu(tu: str) -> str:
     """Âm Hán Việt của TỪ: 学习 -> 'học tập'. Pinyin lấy theo ngữ cảnh cả từ."""
     if not tu:
         return ""
-    cac_py = lazy_pinyin(tu, style=Style.TONE3)
+    w = HSK.get(tu)
+    if w and (w.get("hv") or "").strip():
+        return w["hv"].strip()          # ⚡ có sẵn trong hsk.json → không cần pypinyin
+    Style, lp = _pypinyin()
+    cac_py = lp(tu, style=Style.TONE3)
     am = [am_han_viet_cua_chu(c, py) for c, py in zip(tu, cac_py)]
     return " ".join(a for a in am if a)
 
@@ -595,10 +632,15 @@ def doc_tai_lieu_cn(file: UploadFile = File(...), lang: str = "chi_sim"):
     van_ban_tho = ""
     filename = (file.filename or "").lower()
 
+    # 🛡️ PHANH CHỐNG NỔ RAM: gói Free chỉ 512MB, file quá lớn là bị Render giết ngay
+    if len(noi_dung_file) > 25 * 1024 * 1024:
+        return {"error": "File quá lớn (giới hạn 25MB). Bạn chia nhỏ file rồi tải lại giúp mình nhé!"}
+
     try:
         if filename.endswith(".pdf"):
             doc = pymupdf.open(stream=noi_dung_file, filetype="pdf")
-            for page in doc:
+            # 🛡️ Tối đa 80 trang — PDF vài trăm trang sẽ làm app hết RAM
+            for _, page in zip(range(80), doc):
                 van_ban_tho += str(page.get_text()) + "\n"
             doc.close()
         elif filename.endswith(".txt"):

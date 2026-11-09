@@ -5,7 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>App Luyện Đọc Từ Vựng</title>
     <!-- Các thư viện cần thiết -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- 🛡️ CHỐNG "TRANG TRẮNG QUAY VÒNG MÃI": đặt TRƯỚC mọi script tải từ mạng.
+         Nếu sau 12 giây app vẫn chưa chạy (mạng chặn CDN, file lỗi...), hiện băng đỏ
+         báo rõ ràng thay vì để màn hình trắng im lặng. -->
+    <script>
+        (function () {
+            function hienCanhBao(noiDung) {
+                if (window.__APP_DA_CHAY__ || document.getElementById('canh-bao-tai-trang')) return;
+                var c = document.createElement('div');
+                c.id = 'canh-bao-tai-trang';
+                c.style.cssText = 'position:fixed;z-index:99999;left:0;right:0;top:0;padding:14px 18px;'
+                    + 'background:#b91c1c;color:#fff;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;text-align:center';
+                c.textContent = noiDung;
+                (document.body || document.documentElement).appendChild(c);
+            }
+            window.__hienCanhBaoTaiTrang__ = hienCanhBao;
+            setTimeout(function () {
+                hienCanhBao('⚠️ Không tải được ứng dụng. Hãy tải lại trang (Ctrl/Cmd + F5), thử mạng 4G hoặc trình duyệt khác (Chrome/Safari).');
+            }, 12000);
+        })();
+    </script>
+
+    <!-- 🔌 THƯ VIỆN SUPABASE — TẢI TỪ CHÍNH MÁY CHỦ CỦA MÌNH (thư mục thu-vien/)
+         Vì sao đổi: trước đây file này lấy từ CDN jsdelivr (nước ngoài). Mạng Việt Nam
+         chặn/treo jsdelivr là trình duyệt quay vòng loading TRẮNG XOÁ mãi không hiện gì,
+         vì script trong <head> chặn toàn bộ việc vẽ trang. Nay tải cùng máy chủ (nhanh,
+         không thể bị chặn); nếu file nội bộ lỗi thì tự lùi về CDN. -->
+    <script src="thu-vien/supabase-js-2.js"
+            onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';"></script>
 
     <!-- ================================================================
          🌐 CẤU HÌNH ĐỊA CHỈ BACKEND — KHI DEPLOY CHỈ CẦN XEM KHU VỰC NÀY
@@ -244,7 +271,35 @@
     // 1. CẤU HÌNH API
     const supabaseUrl = 'https://cidflrjpcwmwdlqidayo.supabase.co'; 
     const supabaseKey = 'sb_publishable_HZ396HoOQ5el1jCkWe-5Mg_w5s-vWNk'; 
-    const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+    // 🛡️ Nếu thư viện Supabase không tải được thì app VẪN dùng được phần luyện đọc/tra từ;
+    // chỉ riêng đăng nhập + lưu bài là tạm nghỉ (thay vì làm cả trang chết trắng).
+    let supabaseClient = null;
+    try {
+        if (window.supabase && window.supabase.createClient) {
+            supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+        } else {
+            throw new Error('Chưa tải được thư viện Supabase');
+        }
+    } catch (e) {
+        console.warn('Supabase không khả dụng:', e);
+        supabaseClient = {
+            auth: {
+                getUser: async () => ({ data: { user: null }, error: null }),
+                signUp: async () => ({ error: { message: 'Tạm thời không kết nối được Supabase.' } }),
+                signInWithPassword: async () => ({ error: { message: 'Tạm thời không kết nối được Supabase.' } }),
+                signOut: async () => ({}),
+            },
+            from: () => {
+                const chuoi = {
+                    select: () => ({ eq: () => ({ order: async () => ({ data: [], error: null }) }) }),
+                    insert: async () => ({ error: null }),
+                    update: () => ({ eq: async () => ({ error: null }) }),
+                    delete: () => ({ eq: async () => ({ error: null }) }),
+                };
+                return chuoi;
+            },
+        };
+    }
     // ⚠️ API key Gemini đã được chuyển xuống backend Python (main.py) để không lộ ra trình duyệt.
     // Mọi cuộc gọi AI giờ đều đi qua http://127.0.0.1:8000/ai-tra-tu
 
@@ -1815,6 +1870,10 @@
     function closeStats() { document.getElementById('stats-modal').style.display = 'none'; }
     
     checkUser();
+</script>
+<script>
+    // Đánh dấu: app đã chạy xong phần khởi động -> tắt băng cảnh báo "không tải được"
+    window.__APP_DA_CHAY__ = true;
 </script>
 </body>
 </html>

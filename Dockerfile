@@ -43,6 +43,9 @@ COPY python_backend/ /app/python_backend/
 RUN mkdir -p /app/public
 COPY index.html /app/public/index.html
 COPY index_trung.html /app/public/index_trung.html
+# Thư viện Supabase để SẴN trên máy chủ (không phụ thuộc CDN nước ngoài — mạng VN hay chặn
+# jsdelivr làm trang quay vòng loading trắng xoá không hiện gì)
+COPY thu-vien/ /app/public/thu-vien/
 
 WORKDIR /app/python_backend
 
